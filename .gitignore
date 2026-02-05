@@ -19,7 +19,18 @@ Thumbs.db
 # Data archives
 *.zip
 
-# Output
+# Generated output
 *.eps
 *.png
 *.pdf
+results/*.txt
+figures/
+runs/
+
+# Binary model files (joblib)
+*.joblib
+
+# Local-only files (not pushed to GitHub)
+CLAUDE.md
+*.ipynb
+*.bin

@@ -1,0 +1,47 @@
+particle:
+  AR: 2.0
+  radius: 0.5
+  mass: 1.0
+
+system:
+  kTt: 1.0
+  kTr: 1.0
+  alpha: 0.95
+  phi: 0.01
+  domain: [200, 200, 200]
+
+time:
+  dt: 0.01
+  dtau: 0.1
+  t_end: 200
+
+simulation:
+  seeds: [42, 123, 999, 2024, 777]
+  output_dir: results/
+
+preprocessing:
+  ctc_data_dir: CTC_data/
+  gmm:
+    base_dir: CTC_data/GMM/AR11
+    n_components: 32
+    max_components_bic: 40
+    r_range_start: 1
+    r_range_end: 13
+    # Pre-computed conditional GMM npz file for simulation.
+    # If not specified, auto-detects gmm_cond_*.npz in model_output_dir.
+    gmm_cond_file: models/gmm_cond_AR20.npz
+  scattering:
+    alpha_dirs: [60, 65, 70, 75, 80, 85, 90, 95, 100]
+    ar_dirs: [10, 15, 20, 25, 30, 40]
+    polynomial_K: 4
+    polynomial_M: 2
+    polynomial_N: 2
+    beta: 0.5
+  dissipation:
+    beta_a: 1.211
+    beta_b: 3.672
+  model_output_dir: models/
+
+postprocessing:
+  results_dir: results/
+  figures_dir: figures/
