@@ -34,3 +34,10 @@ runs/
 CLAUDE.md
 *.ipynb
 *.bin
+
+# Large local data directories (not tracked in git)
+LAMMPS_data/
+MFIX_DEM_data/
+results2/
+collision_events.dat
+Zr_mod_claude_ai.md

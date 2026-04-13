@@ -1,17 +1,20 @@
 import os
 import glob
 import numpy as np
-from scipy.stats import beta as beta_dist
 
 from src.preprocessing.scattering_angle import p_chi_AR_alpha
 from src.preprocessing.gmm_energy import ConditionalGMM
-from src.preprocessing.dissipation import load_table, lookup_gamma_max, lookup_one_hit
+from src.preprocessing.dissipation import (
+    load_table, lookup_gamma_max, lookup_one_hit, _interpolate_alpha_for_AR
+)
+from src.preprocessing.ftr_distribution import load_ftr_table, lookup_ftr_params
+from src.preprocessing.zr_eff_table import load_zr_eff_table, lookup_zr_eff
 
 
 class CollisionModels:
     """Container for all pre-computed collision model artifacts."""
 
-    def __init__(self, model_dir, gmm_npz_path=None):
+    def __init__(self, model_dir, gmm_npz_path=None, ftr_params_path=None):
         """Load all model artifacts.
 
         Parameters:
@@ -19,11 +22,14 @@ class CollisionModels:
                        lookup table JSONs
             gmm_npz_path: path to the conditional GMM .npz file.
                           If None, auto-detects gmm_cond_*.npz in model_dir.
+            ftr_params_path: path to ftr_params_*.json for Laplace f_tr sampling.
+                             If None, auto-detects ftr_params_*.json in model_dir.
+                             If no file is found, f_tr sampling is disabled (f_tr=0).
         """
         self.model_dir = model_dir
-        self._load_all(gmm_npz_path)
+        self._load_all(gmm_npz_path, ftr_params_path)
 
-    def _load_all(self, gmm_npz_path):
+    def _load_all(self, gmm_npz_path, ftr_params_path):
         """Load all serialized model artifacts from disk."""
         # Conditional GMM (from pre-computed .npz)
         if gmm_npz_path is None:
@@ -58,6 +64,39 @@ class CollisionModels:
             os.path.join(self.model_dir, "one_hit_table.json")
         )
 
+        # f_tr Laplace parameters (optional — graceful fallback if not found)
+        if ftr_params_path is None:
+            candidates = sorted(
+                glob.glob(os.path.join(self.model_dir, "ftr_params_*.json"))
+            )
+            ftr_params_path = candidates[0] if candidates else None
+            if ftr_params_path:
+                print(f"  Auto-detected f_tr table: {ftr_params_path}")
+
+        if ftr_params_path and os.path.exists(ftr_params_path):
+            self.ftr_table = load_ftr_table(ftr_params_path)
+        else:
+            self.ftr_table = None
+            if ftr_params_path:
+                print(f"  Warning: f_tr table not found at {ftr_params_path}, "
+                      f"f_tr sampling disabled (f_tr=0).")
+
+        # Z_R_eff table (auto-detect; graceful fallback if absent)
+        zr_eff_path = os.path.join(self.model_dir, "zr_eff_table_AR20.json")
+        if os.path.exists(zr_eff_path):
+            self.zr_eff_table = load_zr_eff_table(zr_eff_path)
+            print(f"  Loaded Z_R_eff table: {zr_eff_path}")
+        else:
+            self.zr_eff_table = None
+
+        # C_alpha calibration table (optional)
+        c_alpha_path = os.path.join(self.model_dir, "C_alpha_table_AR20.json")
+        if os.path.exists(c_alpha_path):
+            self.C_alpha_table = load_table(c_alpha_path)
+            print(f"  Loaded C_alpha table: {c_alpha_path}")
+        else:
+            self.C_alpha_table = None
+
     def get_gamma_max(self, alpha, AR):
         """Look up gamma_max for (alpha, AR). Raises KeyError if not found."""
         return lookup_gamma_max(self.gamma_max_table, alpha, AR)
@@ -65,6 +104,39 @@ class CollisionModels:
     def get_one_hit(self, alpha, AR):
         """Look up one-hit probability for (alpha, AR). Raises KeyError if not found."""
         return lookup_one_hit(self.one_hit_table, alpha, AR)
+
+    def get_ftr_params(self, alpha, AR):
+        """Look up Laplace f_tr parameters (loc, scale) for (alpha, AR).
+
+        Returns None if f_tr table has not been loaded.
+        """
+        if self.ftr_table is None:
+            return None
+        return lookup_ftr_params(self.ftr_table, alpha, AR)
+
+    def get_zr_eff(self, alpha, AR):
+        """Look up (theta_star, Z_R_eff) for (alpha, AR).
+
+        Returns None if Z_R_eff table has not been loaded.
+        """
+        if self.zr_eff_table is None:
+            return None
+        return lookup_zr_eff(self.zr_eff_table, alpha, AR)
+
+    def get_C_alpha(self, alpha, AR):
+        """Look up calibration constant C(alpha, AR).
+
+        Returns 1.0 if C_alpha table has not been loaded or key is missing.
+        """
+        if self.C_alpha_table is None:
+            return 1.0
+        key = f"({alpha:.3f}, {float(AR):.1f})"
+        if key in self.C_alpha_table:
+            return float(self.C_alpha_table[key])
+        try:
+            return float(_interpolate_alpha_for_AR(self.C_alpha_table, alpha, AR, "C_alpha"))
+        except KeyError:
+            return 1.0
 
 
 def init_p_chi_distribution(AR, alpha, models):
@@ -102,9 +174,9 @@ def sample_chi(p_chi_fn, p_max, rng=np.random):
             return chi_star
 
 
-def sample_dissp(a, b):
+def sample_dissp(a, b, rng=np.random):
     """Sample a single dissipation fraction from Beta(a, b)."""
-    return beta_dist.rvs(a, b, size=1)[0]
+    return rng.beta(a, b)
 
 
 def update_velocities(velA, velB, chi, eps, crmag):

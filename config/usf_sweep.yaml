@@ -2,32 +2,31 @@ particle:
   AR: 2.0
   radius: 0.5
   mass: 1.0
-  sigma_c_scale: 1.0  # multiplicative correction to sigma_c; set to 1/1.46 ≈ 0.684 to match LAMMPS rate
+  sigma_c_scale: 1.0
 
 system:
   kTt: 1.0
   kTr: 1.0
-  alpha: 1.0
+  alpha: 1.0          # overridden per-case by the sweep
   eta: 1.0
   phi: 0.01
   domain: [200, 200, 200]
-  C_alpha: null  # if null, loaded from calibration.C_alpha_table_file; fallback 1.0
+  C_alpha: null       # loaded from calibration.C_alpha_table_file
 
 time:
   dt: 0.01
   dtau: 0.1
-  t_end: 200
+  t_end: 5000         # overridden by calibration_sweep.t_end
   equilibration_time: 0.0
 
 flow:
-  mode: hcs        # 'hcs' (Homogeneous Cooling State) or 'usf' (Uniform Simple Shear Flow)
-  shear_rate: 0.0  # gdot [1/tau_c]; only used when mode=usf
+  mode: usf
+  shear_rate: 0.08    # gdot [1/tau_c]
 
 simulation:
-  #seeds: [42, 123, 999, 2024, 777]
   seeds: [42]
-  output_dir: results/
-  use_zr_eff: false  # true = fixed (theta*, Z_R_eff) from table; false = dynamic Zr(theta, eta)
+  output_dir: runs/AR2_usf_sweep/results/
+  use_zr_eff: false
 
 preprocessing:
   ctc_data_dir: CTC_data/
@@ -37,8 +36,6 @@ preprocessing:
     max_components_bic: 40
     r_range_start: 1
     r_range_end: 13
-    # Pre-computed conditional GMM npz file for simulation.
-    # If not specified, auto-detects gmm_cond_*.npz in model_output_dir.
     gmm_cond_file: models/gmm_cond_AR20.npz
   scattering:
     alpha_dirs: [60, 65, 70, 75, 80, 85, 90, 95, 100]
@@ -65,17 +62,17 @@ preprocessing:
   model_output_dir: models/
 
 postprocessing:
-  results_dir: results/
-  figures_dir: figures/
-  sweep_root: runs/AR2_eta_sweep
-  sweep_figures_dir: runs/AR2_eta_sweep/figures
+  results_dir: runs/AR2_usf_sweep/results/
+  figures_dir: runs/AR2_usf_sweep/figures/
+  sweep_root: runs/AR2_usf_sweep
+  sweep_figures_dir: runs/AR2_usf_sweep/figures
   sweep_n_time_points: 1200
-  sweep_min_realizations: 5
+  sweep_min_realizations: 1
   reference_realization_index: 0
   asymptotic_tail_fraction: 0.2
   normalize_total_temperature: true
   active_alphas: []
-  exclude_alphas: [0.50, 0.55, 0.60]
+  exclude_alphas: []
 
 calibration:
   C_alpha_table_file: models/C_alpha_table_AR20.json
@@ -83,11 +80,24 @@ calibration:
 
 calibration_sweep:
   AR: 2.0
-  output_root: runs/AR2_eta_sweep
-  alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
-  default_eta: 2.0
-  active_alphas: []  # Empty means run all prepared cases.
-  seeds: [42]
-  t_end: 300
-  equilibration_time: 2.0
-  parallel_workers: 1
+  output_root: runs/AR2_usf_sweep
+  alpha_values: [0.5, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+  default_eta: 1.0
+  default_shear_rate: 0.08          # fallback if shear_rates_by_alpha absent
+  shear_rates_by_alpha:             # gdot(alpha) = 0.08*sqrt((1-alpha^2)/0.64) → T_steady ≈ 1.2
+    0.50: 0.080
+    0.55: 0.0771
+    0.60: 0.0739
+    0.65: 0.0702
+    0.70: 0.0660
+    0.75: 0.0611
+    0.80: 0.0554
+    0.85: 0.0487
+    0.90: 0.0403
+    0.95: 0.0288
+    1.00: 0.010                     # transient only; no theoretical steady state
+  active_alphas: []   # empty = run all
+  seeds: [42, 123, 456, 789]
+  t_end: 2000
+  equilibration_time: 0.0
+  parallel_workers: 5

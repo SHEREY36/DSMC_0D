@@ -1,25 +1,23 @@
 import numpy as np
 
 
-def Zr(theta):
+def Zr(theta, eta=1.0, alpha=None):
     """Rotational collision number as a function of temperature ratio.
 
-    Z_r(theta) = 0.39*theta^2 + 0.09*theta + 1.19
+    For elastic collisions (alpha=1.0): returns the fixed value 1.67 (the
+    theta-independent limit, since there is no preferred temperature ratio).
+    For inelastic collisions: Z_r(theta, eta) = (0.39*theta^2 + 0.09*theta + 1.67) * eta
     """
-    return 0.39 * theta**2 + 0.09 * theta + 1.19
+    if alpha is not None and alpha >= 1.0:
+        return 1.67
+    return (0.39 * theta**2 + 0.09 * theta + 1.67) * eta
 
 
 def prepare_theta(temp_ratio):
     """Discretize temperature ratio to nearest 0.1 for GMM lookup.
 
-    Clamps to [0.1, 1.2]. Raises ValueError if temp_ratio is outside (0, 1.3).
+    Clamps to [0.1, 1.2] silently. No error is raised for out-of-range values.
     """
-    if temp_ratio <= 0.0 or temp_ratio >= 1.3:
-        raise ValueError(
-            f"Error: temp_ratio must be in (0, 1.3). "
-            f"Received temp_ratio = {temp_ratio}"
-        )
-
     r = round(temp_ratio * 10) / 10.0
 
     if r < 0.1:
@@ -28,3 +26,7 @@ def prepare_theta(temp_ratio):
         r = 1.2
 
     return r
+
+def sample_f_tr(loc, scale):
+    """Sample translational dissipation fraction from a fitted Laplace distribution."""
+    return np.random.laplace(loc, scale)

@@ -61,13 +61,9 @@ def lookup_gamma_max(table, alpha, AR):
     Raises KeyError with an informative message if the pair is not found.
     """
     key = f"({alpha}, {AR})"
-    if key not in table:
-        available = sorted(table.keys())
-        raise KeyError(
-            f"gamma_max not available for (alpha={alpha}, AR={AR}). "
-            f"Available pairs: {available}"
-        )
-    return table[key]
+    if key in table:
+        return table[key]
+    return _interpolate_alpha_for_AR(table, alpha, AR, "gamma_max")
 
 
 def lookup_one_hit(table, alpha, AR):
@@ -76,13 +72,9 @@ def lookup_one_hit(table, alpha, AR):
     Raises KeyError with an informative message if the pair is not found.
     """
     key = f"({alpha}, {AR})"
-    if key not in table:
-        available = sorted(table.keys())
-        raise KeyError(
-            f"one_hit probability not available for (alpha={alpha}, AR={AR}). "
-            f"Available pairs: {available}"
-        )
-    return table[key]
+    if key in table:
+        return table[key]
+    return _interpolate_alpha_for_AR(table, alpha, AR, "one_hit probability")
 
 
 def save_table(table, filepath):
@@ -95,6 +87,51 @@ def load_table(filepath):
     """Load a lookup table from a JSON file."""
     with open(filepath, 'r') as f:
         return json.load(f)
+
+
+def _parse_table_key(key):
+    alpha_str, ar_str = key.strip()[1:-1].split(",")
+    return float(alpha_str.strip()), float(ar_str.strip())
+
+
+def _interpolate_alpha_for_AR(table, alpha, AR, quantity_name):
+    alpha = float(alpha)
+    AR = float(AR)
+
+    pairs = []
+    for key, value in table.items():
+        alpha_i, ar_i = _parse_table_key(key)
+        if np.isclose(ar_i, AR, atol=1e-12):
+            pairs.append((alpha_i, float(value)))
+
+    if not pairs:
+        available = sorted({_parse_table_key(k)[1] for k in table.keys()})
+        raise KeyError(
+            f"{quantity_name} not available for AR={AR}. "
+            f"Available AR values: {available}"
+        )
+
+    pairs.sort(key=lambda x: x[0])
+    alphas = np.array([p[0] for p in pairs], dtype=float)
+    values = np.array([p[1] for p in pairs], dtype=float)
+
+    idx = np.where(np.isclose(alphas, alpha, atol=1e-12))[0]
+    if idx.size > 0:
+        return float(values[idx[0]])
+
+    if alpha <= alphas[0]:
+        if len(alphas) == 1:
+            return float(values[0])
+        slope = (values[1] - values[0]) / (alphas[1] - alphas[0])
+        return float(values[0] + slope * (alpha - alphas[0]))
+
+    if alpha >= alphas[-1]:
+        if len(alphas) == 1:
+            return float(values[-1])
+        slope = (values[-1] - values[-2]) / (alphas[-1] - alphas[-2])
+        return float(values[-1] + slope * (alpha - alphas[-1]))
+
+    return float(np.interp(alpha, alphas, values))
 
 
 def sample_dissp(a, b):

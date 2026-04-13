@@ -32,7 +32,7 @@ def compute_particle_params(config):
     volume = (np.pi * diameter**3 / 6) + (np.pi * lcycl * radius**2)
     rho = mass / volume
 
-    # Moment of inertia (perpendicular axes)
+    # Moment of inertia of Spherocylinder (perpendicular axes)
     mI = (
         (np.pi / 48) * rho * diameter**2 * lcycl**3
         + (3.0 * np.pi / 64.0) * rho * diameter**4 * lcycl
@@ -43,8 +43,10 @@ def compute_particle_params(config):
     omass = 1.0 / mass
     omI = 1.0 / mI
 
-    # Collision cross-section
+    # Collision cross-section (optional scale factor from config for calibration)
     sigma_c = (0.32 * AR**2 + 0.694 * AR - 0.0213) * np.pi
+    sigma_c_scale = config['particle'].get('sigma_c_scale', 1.0)
+    sigma_c *= sigma_c_scale
 
     return SpherocylinderParams(
         AR=AR, radius=radius, mass=mass, diameter=diameter,
