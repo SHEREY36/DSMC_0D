@@ -271,10 +271,13 @@ def main():
     gmm_path = f"models/gmm_cond_AR{ar_int:02d}.npz"
     ftr_path  = config['preprocessing'].get('ftr', {}).get('ftr_params_file')
 
-    # Build calibration config
+    # Default t_end from config (fallback when table has no t_end entry)
+    default_t_end = config.get('calibration_sweep', {}).get('t_end', 300)
+
+    # Build calibration config (t_end is overridden per-task below)
     calib_cfg = copy.deepcopy(config)
     calib_cfg['particle']['AR'] = AR
-    calib_cfg['time']['t_end'] = config.get('calibration_sweep', {}).get('t_end', 300)
+    calib_cfg['time']['t_end'] = default_t_end  # overridden per task
     calib_cfg['time']['equilibration_time'] = config.get(
         'calibration_sweep', {}).get('equilibration_time', 2.0)
     calib_cfg['simulation']['output_dir'] = output_dir
@@ -290,6 +293,7 @@ def main():
 
     print(f"\nCalibrating C(alpha) for AR={AR}, alphas={alpha_values}")
     print(f"Theta table: {theta_table_path}")
+    print(f"Default t_end: {default_t_end} (overridden per case when table supplies t_end)")
     print(f"Seed: {args.seed}, tol: {args.tol}, max_iter: {args.max_iter}, "
           f"workers: {args.workers}\n")
 
@@ -301,20 +305,35 @@ def main():
             print(f"[{alpha:.2f}] Already in table (C={C_table[key]:.5f}), skipping.")
             continue
         if key not in theta_table:
-            print(f"[{alpha:.2f}] Skipping: theta_target not found in {theta_table_path} for key {key}")
+            print(f"[{alpha:.2f}] Skipping: theta_target not found in "
+                  f"{theta_table_path} for key {key}")
             continue
-        theta_target = float(theta_table[key])
-        print(f"[{alpha:.2f}] theta*_target = {theta_target:.5f}")
+
+        # Handle both new dict schema and old flat-float schema
+        entry = theta_table[key]
+        if isinstance(entry, dict):
+            theta_target = float(entry['theta_star'])
+            t_end_case   = float(entry.get('t_end', default_t_end))
+        else:
+            theta_target = float(entry)
+            t_end_case   = default_t_end
+
+        print(f"[{alpha:.2f}] theta*_target={theta_target:.5f}  t_end={t_end_case:.1f}")
 
         alpha_int = int(round(alpha * 100))
+        # Build a per-task config copy with the correct t_end
+        task_cfg = copy.deepcopy(calib_cfg)
+        task_cfg['time']['t_end'] = t_end_case
+
         tasks_to_run.append({
             'alpha':        alpha,
             'AR':           AR,
             'theta_target': theta_target,
+            't_end':        t_end_case,
             'seed':         args.seed,
             'tol':          args.tol,
             'max_iter':     args.max_iter,
-            'base_config':  calib_cfg,
+            'base_config':  task_cfg,
             'output_dir':   output_dir,
             'model_dir':    model_dir,
             'gmm_path':     gmm_path,
@@ -341,9 +360,10 @@ def main():
 
         for task in tasks_to_run:
             alpha = task['alpha']
-            print(f"\n[{alpha:.2f}] Running Illinois calibration...")
+            print(f"\n[{alpha:.2f}] Running Illinois calibration "
+                  f"(t_end={task['t_end']:.1f})...")
             C_opt = _illinois_C(
-                calib_cfg, models, alpha, task['theta_target'],
+                task['base_config'], models, alpha, task['theta_target'],
                 seed=args.seed, output_dir=output_dir,
                 tol=args.tol, max_iter=args.max_iter,
             )

@@ -75,9 +75,13 @@ ALPHA_INT=$(python -c "print(f'{round(float(\"${ALPHA}\")*100):03d}')")
 echo "Task ${SLURM_ARRAY_TASK_ID}: AR=${AR}, alpha=${ALPHA}"
 
 # NOTE: Before submitting this job array, run once on the login node:
-#   python extract_theta_target.py --config config/default.yaml --AR ${AR}
-# This pre-extracts theta* values from LAMMPS data into:
-#   models/theta_target_table_AR${AR_INT}.json
+#   python extract_theta_target.py --config config/default.yaml --AR ${AR} \
+#       --lammps-root LAMMPS_data/HCS/Calibrate_r/modeB_e_sweep${AR_INT}
+# This pre-extracts theta* AND case-specific t_end values from LAMMPS settling
+# detection into:  models/theta_target_table_AR${AR_INT}.json
+# calibrate_C_alpha.py reads t_end per (alpha, AR) from that table, so each
+# task uses the minimum simulation time needed to reach steady state plus a
+# 30% safety margin — no flat t_end is applied across all cases.
 THETA_TABLE="models/theta_target_table_AR${AR_INT}.json"
 
 # Each task writes to its own JSON to avoid race conditions.
