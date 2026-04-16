@@ -163,7 +163,7 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
 
     seed_pxx, seed_pyy, seed_pzz, seed_pxy, seed_theta = [], [], [], [], []
     # per-seed data for diagnostics
-    diag_t, diag_T = [], []
+    diag_t, diag_T, diag_theta = [], [], []
     diag_stats_start, diag_plateau_start = [], []
 
     n_seeds = len(cfg.get("simulation", {}).get("seeds", [None] * 4))
@@ -190,6 +190,7 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
 
         diag_t.append(t)
         diag_T.append(T_tot)
+        diag_theta.append(T_tr / np.where(T_rot > 0, T_rot, np.nan))
         diag_stats_start.append(stats_t_start)
         diag_plateau_start.append(plat_t_start)
 
@@ -221,6 +222,7 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
         # diagnostics
         t_series=diag_t,
         T_series=diag_T,
+        theta_series=diag_theta,
         stats_starts=diag_stats_start,
         plateau_starts=diag_plateau_start,
         n_seeds=len(seed_pxx),
@@ -288,11 +290,17 @@ def load_lammps_sphcyl(base_dir: Path, tail_frac: float = 0.30) -> list[dict]:
     return rows
 
 
-def load_lammps_spheres(base_dir: Path, tail_frac: float = 0.30) -> list[dict]:
+def load_lammps_spheres(base_dir: Path, tail_frac: float = 0.30,
+                        elastic_early_rows: int = 850) -> list[dict]:
     """Load LAMMPS sphere shear stats.
 
     Follows plot_dilute.py (tail_mean frac=0.3) and plot_sphcyl_vs_sphere.py
     (average_last_fraction frac=0.3).  shear_stats.dat cols 1-4 → Pxx* … Pxy*.
+
+    For the elastic case (alpha=1.0) USF has no steady state — the system
+    undergoes a string instability at long times.  The physically meaningful
+    window is the early plateau before the instability sets in, so we average
+    over the first `elastic_early_rows` rows instead of the tail.
     """
     rows = []
     for folder in sorted(base_dir.iterdir()):
@@ -303,13 +311,25 @@ def load_lammps_spheres(base_dir: Path, tail_frac: float = 0.30) -> list[dict]:
         if not ss_path.exists():
             continue
         ss = np.atleast_2d(np.loadtxt(ss_path, comments="#"))
-        rows.append(dict(
-            e=e_val,
-            Pxx=_lammps_tail_mean(ss[:, 1], tail_frac),
-            Pyy=_lammps_tail_mean(ss[:, 2], tail_frac),
-            Pzz=_lammps_tail_mean(ss[:, 3], tail_frac),
-            Pxy=_lammps_tail_mean(ss[:, 4], tail_frac),
-        ))
+
+        if abs(e_val - 1.0) < 1e-3:
+            # Elastic: use early plateau before string instability
+            window = ss[:elastic_early_rows]
+            rows.append(dict(
+                e=e_val,
+                Pxx=float(np.mean(window[:, 1])),
+                Pyy=float(np.mean(window[:, 2])),
+                Pzz=float(np.mean(window[:, 3])),
+                Pxy=float(np.mean(window[:, 4])),
+            ))
+        else:
+            rows.append(dict(
+                e=e_val,
+                Pxx=_lammps_tail_mean(ss[:, 1], tail_frac),
+                Pyy=_lammps_tail_mean(ss[:, 2], tail_frac),
+                Pzz=_lammps_tail_mean(ss[:, 3], tail_frac),
+                Pxy=_lammps_tail_mean(ss[:, 4], tail_frac),
+            ))
     rows.sort(key=lambda r: r["e"])
     return rows
 
@@ -547,13 +567,132 @@ def load_nsp_dsmc_sweep(sweep_dir: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Sphere NSP DSMC loader (Run_shear_NN format)
+# ---------------------------------------------------------------------------
+
+def load_nsphere_dsmc_case(case_dir: Path,
+                            elastic_early_rows: int = 850) -> dict | None:
+    """Load one sphere NSP DSMC case (Run_shear_NN/NNN format).
+
+    system_input.dat layout (sphere, differs from spherocylinder):
+      line 0:  Lx Ly Lz           (domain box lengths)
+      line 3:  PIP                 (number of particles)
+      line 7:  alpha
+
+    Pijk.txt cols  : Pxx_k  Pyy_k  Pzz_k  Pxy_k  Pxz_k  Pyz_k
+    Pijc.txt cols  : Pxx_c  Pxy_c  Pxz_c  Pyy_c  Pyz_c  Pzz_c
+    tg.txt   col 2 : GRANULAR = sum_v^2/(3N) = T_trans
+
+    Normalisation: P*_ij = (P_ij_k + P_ij_c) / (N * T_trans)
+    No chi factor (dilute); no volume factor (cancels with density).
+
+    Flow direction is y in the NSP sphere code → Pxx↔Pyy swap to match
+    the LAMMPS/KT convention where flow is in x.
+
+    For alpha=1 (elastic) there is no USF steady state (string instability).
+    The early plateau (rows 0:elastic_early_rows) is used instead of
+    plateau detection.
+    """
+    sys_path = case_dir / "system_input.dat"
+    tg_path  = case_dir / "tg.txt"
+    pk_path  = case_dir / "Pijk.txt"
+    pc_path  = case_dir / "Pijc.txt"
+    if not (sys_path.exists() and tg_path.exists() and pk_path.exists()):
+        return None
+
+    try:
+        with open(sys_path) as fh:
+            raw = fh.read().replace("D", "E").replace("d", "e")
+        lines = raw.strip().split("\n")
+        pip   = int(lines[3].strip())
+        alpha = float(lines[7].strip())
+
+        tg   = _loadtxt_fortran(str(tg_path))
+        pijk = _loadtxt_fortran(str(pk_path))
+    except Exception:
+        return None
+
+    if pc_path.exists() and pc_path.stat().st_size > 0:
+        try:
+            pc_raw = _loadtxt_fortran(str(pc_path))
+            # reorder [xx,xy,xz,yy,yz,zz] → [xx,yy,zz,xy,xz,yz]
+            pijc = np.column_stack([
+                pc_raw[:, 0], pc_raw[:, 3], pc_raw[:, 5],
+                pc_raw[:, 1], pc_raw[:, 2], pc_raw[:, 4],
+            ])
+        except Exception:
+            pijc = None
+    else:
+        pijc = None
+
+    # align: pijk has 1 more row than pijc (PREV_TIME==0 on first step)
+    n_k = pijk.shape[0]
+    if pijc is not None:
+        offset  = max(0, n_k - pijc.shape[0])
+        P_total = pijk[offset:] + pijc   # [xx,yy,zz,xy,xz,yz]
+    else:
+        offset  = 0
+        P_total = pijk
+
+    T_trans = tg[offset:, 2]   # GRANULAR = T_trans
+
+    if abs(alpha - 1.0) < 1e-3:
+        # Elastic: no steady state — use early plateau before string instability
+        n_rows = min(elastic_early_rows, len(T_trans))
+        mask_t = np.zeros(len(T_trans), dtype=bool)
+        mask_t[:n_rows] = True
+    else:
+        mask_t, _, _ = _stats_mask(T_trans, stats_frac=0.50,
+                                   threshold=5e-4, smooth_window=51)
+
+    T_mean = float(np.mean(T_trans[mask_t]))
+    scale  = 1.0 / (pip * T_mean)
+
+    # Pxx↔Pyy swap: NSP flow=y → col 1 (yy) is flow direction = P*_xx
+    Pxx = float(scale * np.mean(P_total[mask_t, 1]))
+    Pyy = float(scale * np.mean(P_total[mask_t, 0]))
+    Pzz = float(scale * np.mean(P_total[mask_t, 2]))
+    Pxy = float(scale * np.mean(P_total[mask_t, 3]))
+
+    return dict(
+        alpha=alpha,
+        Pxx_mean=Pxx, Pxx_std=0.0,
+        Pyy_mean=Pyy, Pyy_std=0.0,
+        Pzz_mean=Pzz, Pzz_std=0.0,
+        Pxy_mean=Pxy, Pxy_std=0.0,
+        theta_mean=float("nan"), theta_std=0.0,
+    )
+
+
+def load_nsphere_dsmc_sweep(sweep_dir: Path,
+                             elastic_early_rows: int = 850) -> list[dict]:
+    """Load all sphere NSP DSMC cases from sweep_dir.
+
+    Subdirectory naming convention: integer alpha*100 (e.g. 60, 70, ..., 100).
+    """
+    cases = []
+    for d in sorted(sweep_dir.iterdir()):
+        if not d.is_dir():
+            continue
+        try:
+            int(d.name)
+        except ValueError:
+            continue
+        c = load_nsphere_dsmc_case(d, elastic_early_rows=elastic_early_rows)
+        if c is not None:
+            cases.append(c)
+    cases.sort(key=lambda x: x["alpha"])
+    return cases
+
+
+# ---------------------------------------------------------------------------
 # Shared figure-generation helper
 # ---------------------------------------------------------------------------
 
 def _generate_all_figures(dsmc_cases, lmp_sphcyl, lmp_spheres, kt,
                            out_dir: Path, time_label: str = "Time",
                            lmp_nematic=None, lmp_angvel=None,
-                           lmp_sphcyl_dir=None):
+                           lmp_sphcyl_dir=None, dsmc_spheres=None):
     """Write all USF figures into out_dir."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -561,9 +700,14 @@ def _generate_all_figures(dsmc_cases, lmp_sphcyl, lmp_spheres, kt,
     plot_steady_diagnostics(dsmc_cases, out_dir / "steady_diagnostics.png",
                             time_label=time_label)
 
+    print("Plotting DSMC theta diagnostics...")
+    plot_dsmc_theta_diagnostics(dsmc_cases, out_dir / "dsmc_theta_diagnostics.png",
+                                time_label=time_label)
+
     print("Plotting stress overlay...")
     plot_stress_overlay(dsmc_cases, lmp_sphcyl, lmp_spheres, kt,
-                        out_dir / "stress_overlay_2x2.png")
+                        out_dir / "stress_overlay_2x2.png",
+                        dsmc_spheres=dsmc_spheres)
 
     print("Plotting temperature ratio...")
     plot_temperature_ratio(dsmc_cases, lmp_sphcyl,
@@ -660,6 +804,68 @@ def plot_steady_diagnostics(dsmc_cases: list[dict], out_path: Path,
 
 
 # ---------------------------------------------------------------------------
+# Figure 1b: DSMC theta = T_trans/T_rot diagnostics
+# ---------------------------------------------------------------------------
+
+def plot_dsmc_theta_diagnostics(dsmc_cases: list[dict], out_path: Path,
+                                 time_label: str = "Time"):
+    n = len(dsmc_cases)
+    ncols = 2
+    nrows = math.ceil(n / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(11, 2.6 * nrows),
+                             sharex=False, sharey=False)
+    axes = np.array(axes).ravel()
+
+    cmap = plt.get_cmap("plasma")
+    alpha_vals = [c["alpha"] for c in dsmc_cases]
+    amin, amax = min(alpha_vals), max(alpha_vals)
+
+    for idx, case in enumerate(dsmc_cases):
+        ax = axes[idx]
+        color = cmap(0.1 + 0.8 * (case["alpha"] - amin) / max(amax - amin, 1e-9))
+
+        for t_arr, th_arr in zip(case["t_series"], case["theta_series"]):
+            tx, thx = _thin(t_arr, th_arr, 800)
+            ax.plot(tx, thx, color=color, lw=0.8, alpha=0.55)
+
+        if case["t_series"]:
+            t0       = case["t_series"][0]
+            th0      = case["theta_series"][0]
+            t_stats  = case["stats_starts"][0]
+            t_plat   = case["plateau_starts"][0]
+
+            mask_shade = t0 >= t_stats
+            if mask_shade.any():
+                th_mean = float(np.nanmean(th0[mask_shade]))
+                ax.axvspan(t_stats, float(t0[-1]), color=color, alpha=0.20, lw=0)
+                ax.hlines(th_mean, t_stats, float(t0[-1]),
+                          colors=color, lw=1.3, ls="--", alpha=0.95, zorder=3)
+
+            ax.axvline(t_plat,  color="0.5", lw=0.8, ls=":")
+            ax.axvline(t_stats, color="0.2", lw=1.0, ls="--")
+
+        ax.set_title(rf"$\alpha = {case['alpha']:.2f}$", fontsize=9)
+        ax.tick_params(labelsize=8)
+        ax.set_xlabel(time_label, fontsize=8)
+        ax.set_ylabel(r"$\theta = T_{\rm tr}/T_{\rm rot}$", fontsize=8)
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(4))
+        ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
+
+    for idx in range(n, len(axes)):
+        axes[idx].set_visible(False)
+
+    fig.suptitle(
+        r"DSMC USF — temperature ratio $\theta = T_{\rm tr}/T_{\rm rot}$"
+        "\nshaded = stats window  |  dashed line = stats start  |  dotted = plateau start",
+        fontsize=10
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {out_path}")
+
+
+# ---------------------------------------------------------------------------
 # Figure 2: Stress tensor overlay (2×2)
 # ---------------------------------------------------------------------------
 
@@ -667,7 +873,8 @@ def plot_stress_overlay(dsmc_cases: list[dict],
                         lmp_sphcyl: list[dict],
                         lmp_spheres: list[dict],
                         kt: dict,
-                        out_path: Path):
+                        out_path: Path,
+                        dsmc_spheres: list[dict] | None = None):
 
     dsmc_a = np.array([c["alpha"] for c in dsmc_cases])
     lsc_a  = np.array([r["e"]     for r in lmp_sphcyl])
@@ -689,11 +896,16 @@ def plot_stress_overlay(dsmc_cases: list[dict],
     lsp_vals = {k: np.array([r[k] for r in lmp_spheres]) for k in ("Pxx","Pyy","Pzz","Pxy")}
     kt_vals  = {"Pxx": kt["Pxx"], "Pyy": kt["Pyy"], "Pzz": kt["Pzz"], "Pxy": kt["Pxy"]}
 
-    C_DSMC = "#2166AC"   # steelblue
-    C_LSC  = "#1A1A2E"   # near-black navy
-    C_LSP  = "#D95F02"   # burnt orange
-    C_KT   = "#555555"   # grey
+    C_DSMC  = "#2166AC"   # steelblue
+    C_LSC   = "#1A1A2E"   # near-black navy
+    C_LSP   = "#D95F02"   # burnt orange
+    C_KT    = "#555555"   # grey
+    C_DSPHR = "#2CA02C"   # green — DSMC spheres
     ms = 7.5
+
+    dsp_a    = np.array([c["alpha"]        for c in dsmc_spheres]) if dsmc_spheres else np.array([])
+    dsp_vals = {k: np.array([c[f"{k}_mean"] for c in dsmc_spheres])
+                for k in ("Pxx","Pyy","Pzz","Pxy")} if dsmc_spheres else {}
 
     fig, axes = plt.subplots(2, 2, figsize=(9.5, 7.5))
     axes_flat = axes.ravel()
@@ -724,17 +936,26 @@ def plot_stress_overlay(dsmc_cases: list[dict],
         h4, = ax.plot(kt["alpha"], kt_vals[key], "-", color=C_KT, lw=1.5,
                       zorder=1, label="KT (spheres)")
 
+        # DSMC spheres — open circles
+        h5 = None
+        if len(dsp_a) > 0:
+            h5, = ax.plot(dsp_a, dsp_vals[key], ls="none", marker="o", ms=ms,
+                          mec=C_DSPHR, mfc="none", mew=1.6, zorder=4,
+                          label="DSMC spheres")
+
         ax.set_ylabel(ylabel, fontsize=11)
         ax.tick_params(labelsize=9, direction="in", which="both", top=True, right=True)
         ax.grid(True, ls="--", lw=0.4, alpha=0.45)
 
         all_y = (list(mean_d) + list(lsc_vals[key]) +
-                 list(lsp_vals[key]) + list(kt_vals[key]))
+                 list(lsp_vals[key]) + list(kt_vals[key]) +
+                 (list(dsp_vals[key]) if len(dsp_a) > 0 else []))
         ylo, yhi = _axis_limits([all_y])
         if ylo is not None:
             ax.set_ylim(ylo, yhi)
 
-        all_x = list(dsmc_a) + list(lsc_a) + list(lsp_a) + list(kt["alpha"])
+        all_x = (list(dsmc_a) + list(lsc_a) + list(lsp_a) + list(kt["alpha"]) +
+                 (list(dsp_a) if len(dsp_a) > 0 else []))
         xlo, xhi = _axis_limits([all_x], pad=0.03)
         if xlo is not None:
             ax.set_xlim(xlo, xhi)
@@ -743,10 +964,11 @@ def plot_stress_overlay(dsmc_cases: list[dict],
             ax.set_xlabel(r"Coefficient of restitution $\alpha$", fontsize=11)
 
         if ax_idx == 0:
-            legend_handles = [h1, h2, h3, h4]
+            legend_handles = [h for h in [h1, h2, h3, h4, h5] if h is not None]
 
+    ncol_leg = len(legend_handles)
     fig.legend(legend_handles, [h.get_label() for h in legend_handles],
-               loc="lower center", ncol=4, fontsize=9.5,
+               loc="lower center", ncol=ncol_leg, fontsize=9.5,
                frameon=True, edgecolor="0.7",
                bbox_to_anchor=(0.5, 0.0))
 
@@ -1120,6 +1342,9 @@ def main():
     parser.add_argument("--sweep-dir",      default="runs/AR2_usf_sweep")
     parser.add_argument("--lammps-sphcyl",  default="LAMMPS_data/USF/sphcyl_USF_AR2")
     parser.add_argument("--lammps-spheres", default="LAMMPS_data/USF/spheres/dilute3a")
+    parser.add_argument("--dsmc-spheres",   default="runs/Run_shear_NN",
+                        help="Path to NSP sphere DSMC sweep (Run_shear_NN format); "
+                             "pass empty string to skip.")
     parser.add_argument("--out-dir",        default=None)
     args = parser.parse_args()
 
@@ -1150,10 +1375,21 @@ def main():
     lmp_angvel = load_lammps_angvel(Path(args.lammps_sphcyl))
     print(f"  {len(lmp_angvel)} cases loaded.")
 
+    dsmc_spheres = None
+    if args.dsmc_spheres:
+        dsmc_sph_dir = Path(args.dsmc_spheres)
+        if dsmc_sph_dir.exists():
+            print("Loading DSMC sphere cases...")
+            dsmc_spheres = load_nsphere_dsmc_sweep(dsmc_sph_dir)
+            print(f"  {len(dsmc_spheres)} cases: alpha = {[c['alpha'] for c in dsmc_spheres]}")
+        else:
+            print(f"  DSMC spheres dir not found: {dsmc_sph_dir} — skipping.")
+
     _generate_all_figures(dsmc_cases, lmp_sphcyl, lmp_spheres, kt, out_dir,
                           time_label="Time",
                           lmp_nematic=lmp_nematic, lmp_angvel=lmp_angvel,
-                          lmp_sphcyl_dir=Path(args.lammps_sphcyl))
+                          lmp_sphcyl_dir=Path(args.lammps_sphcyl),
+                          dsmc_spheres=dsmc_spheres)
     print(f"\nDone. Figures in: {out_dir}")
 
 

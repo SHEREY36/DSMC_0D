@@ -43,10 +43,14 @@ def compute_particle_params(config):
     omass = 1.0 / mass
     omI = 1.0 / mI
 
-    # Collision cross-section (optional scale factor from config for calibration)
-    sigma_c = (0.32 * AR**2 + 0.694 * AR - 0.0213) * np.pi
-    sigma_c_scale = config['particle'].get('sigma_c_scale', 1.0)
-    sigma_c *= sigma_c_scale
+    # Collision cross-section
+    sphere_mode = config.get('simulation', {}).get('sphere_collision', False)
+    if sphere_mode:
+        sigma_c = np.pi * diameter**2
+    else:
+        sigma_c = (0.32 * AR**2 + 0.694 * AR - 0.0213) * np.pi
+        sigma_c_scale = config['particle'].get('sigma_c_scale', 1.0)
+        sigma_c *= sigma_c_scale
 
     return SpherocylinderParams(
         AR=AR, radius=radius, mass=mass, diameter=diameter,

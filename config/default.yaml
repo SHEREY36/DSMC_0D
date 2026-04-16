@@ -2,7 +2,7 @@ particle:
   AR: 2.0
   radius: 0.5
   mass: 1.0
-  sigma_c_scale: 1.0  # multiplicative correction to sigma_c; set to 1/1.46 ≈ 0.684 to match LAMMPS rate
+  sigma_c_scale: 1.020  # multiplicative correction to sigma_c; measured from DSMC vs LAMMPS tau slope ratio (mean over α=0.55–0.95)
 
 system:
   kTt: 1.0
@@ -28,6 +28,7 @@ simulation:
   seeds: [42]
   output_dir: results/
   use_zr_eff: false  # true = fixed (theta*, Z_R_eff) from table; false = dynamic Zr(theta, eta)
+  sphere_collision: false  # true = sphere mode; bypasses all empirical sub-models
 
 preprocessing:
   ctc_data_dir: CTC_data/

@@ -49,6 +49,8 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     """
     np.random.seed(seed)
 
+    sphere_mode = config.get('simulation', {}).get('sphere_collision', False)
+
     # Particle properties
     params = compute_particle_params(config)
 
@@ -65,29 +67,40 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     ovol = 1.0 / volsys
     Np = math.ceil(phi * volsys / params.volume)
 
-    # Dissipation parameters (fail-fast lookup)
-    if alpha < 1.0:
-        gamma_max = models.get_gamma_max(alpha, params.AR)
-        prob_one_hit = models.get_one_hit(alpha, params.AR)
-    else:
+    # Dissipation parameters — skipped entirely in sphere mode
+    if sphere_mode:
         gamma_max = 0.0
         prob_one_hit = 1.0
-    beta_a = config['preprocessing']['dissipation']['beta_a']
-    beta_b = config['preprocessing']['dissipation']['beta_b']
-    # Z_R_eff lookup (only used when simulation.use_zr_eff is true)
-    use_zr_eff_cfg = config.get('simulation', {}).get('use_zr_eff', False)
-    zr_eff_result = models.get_zr_eff(alpha, params.AR) if use_zr_eff_cfg else None
-    if zr_eff_result is not None:
-        theta_star_eff, Z_R_eff_val = zr_eff_result
-        gmm_theta2 = prepare_theta(theta_star_eff)  # fixed GMM input at theta*
-        use_zr_eff = True
-    else:
-        theta_star_eff = None
-        gmm_theta2 = None
+        beta_a = beta_b = 0.0
         use_zr_eff = False
-        
-    # C_alpha: config override takes priority, then table lookup, then 1.0
-    C_alpha = config['system'].get('C_alpha') or models.get_C_alpha(alpha, params.AR)
+        theta_star_eff = gmm_theta2 = None
+        Z_R_eff_val = None
+        C_alpha = 1.0
+    else:
+        if alpha < 1.0:
+            gamma_max = models.get_gamma_max(alpha, params.AR)
+            prob_one_hit = models.get_one_hit(alpha, params.AR)
+        else:
+            gamma_max = 0.0
+            prob_one_hit = 1.0
+
+        beta_a = config['preprocessing']['dissipation']['beta_a']
+        beta_b = config['preprocessing']['dissipation']['beta_b']
+        # Z_R_eff lookup (only used when simulation.use_zr_eff is true)
+        use_zr_eff_cfg = config.get('simulation', {}).get('use_zr_eff', False)
+        zr_eff_result = models.get_zr_eff(alpha, params.AR) if use_zr_eff_cfg else None
+        if zr_eff_result is not None:
+            theta_star_eff, Z_R_eff_val = zr_eff_result
+            gmm_theta2 = prepare_theta(theta_star_eff)  # fixed GMM input at theta*
+            use_zr_eff = True
+        else:
+            theta_star_eff = None
+            gmm_theta2 = None
+            use_zr_eff = False
+            Z_R_eff_val = None
+
+        # C_alpha: config override takes priority, then table lookup, then 1.0
+        C_alpha = config['system'].get('C_alpha') or models.get_C_alpha(alpha, params.AR)
 
     # Flow mode
     flow_mode = config.get('flow', {}).get('mode', 'hcs')
@@ -108,19 +121,25 @@ def run_simulation(config, models, seed, output_path, pressure_path):
             f"time.equilibration_time must be >= 0, got {equilibration_time}"
         )
 
-    # Scattering angle distribution for target alpha and elastic equilibration.
-    p_chi_fn_target, p_max_target = init_p_chi_distribution(
-        params.AR, alpha, models
-    )
-    if equilibration_time > 0.0 and alpha < 1.0:
-        p_chi_fn_eq, p_max_eq = init_p_chi_distribution(params.AR, 1.0, models)
+    # Scattering angle distribution — skipped in sphere mode (isotropic scattering)
+    if not sphere_mode:
+        p_chi_fn_target, p_max_target = init_p_chi_distribution(
+            params.AR, alpha, models
+        )
+        if equilibration_time > 0.0 and alpha < 1.0:
+            p_chi_fn_eq, p_max_eq = init_p_chi_distribution(params.AR, 1.0, models)
+        else:
+            p_chi_fn_eq, p_max_eq = p_chi_fn_target, p_max_target
     else:
-        p_chi_fn_eq, p_max_eq = p_chi_fn_target, p_max_target
+        p_chi_fn_target = p_max_target = p_chi_fn_eq = p_max_eq = None
 
     # Initialize particles
     vel, omega, Er = initialize_particles(
         Np, kTt, kTr, params.mass, params.mI
     )
+    if sphere_mode:
+        Er[:] = 0.0
+        omega[:] = 0.0
 
     vrmax = 5.0 * np.sqrt(2.0) * np.sqrt(kTt * params.omass)
 
@@ -131,7 +150,10 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     t_last_output = 0.0
 
     flow_str = f"flow={flow_mode}" + (f", gdot={gdot:.4f}" if flow_mode == 'usf' else "")
-    if use_zr_eff:
+    if sphere_mode:
+        print(f"  Np={Np}, sphere_collision=True, alpha={alpha:.4f}, "
+              f"sigma_c={params.sigma_c:.6f}, {flow_str}")
+    elif use_zr_eff:
         print(f"  Np={Np}, Z_R_eff={Z_R_eff_val:.4f}, theta*={theta_star_eff:.4f}, "
               f"C_alpha={C_alpha:.4f}, gamma_max={gamma_max:.6f}, "
               f"prob_one_hit={prob_one_hit:.6f}, equilibration_time={equilibration_time:.3f}, "
@@ -181,7 +203,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
             Ttrans = (2.0 * 0.5 * params.mass
                       * np.sum(np.sum(vel**2, axis=1)) / (3.0 * Np))
             Trot = np.sum(Er) / float(Np)
-            temp_ratio = Ttrans / Trot
+            temp_ratio = Ttrans / Trot if Trot > 0.0 else 1.0
 
             # NTC collision selection
             totalSel = (float(Np) * float(Np - 1)
@@ -215,122 +237,131 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
                 NColl += 2
 
-                vcom = (v1 + v2) * 0.5
-                v1com = v1 - vcom
-                v2com = v2 - vcom
-
-                Etrans_i = 0.5 * params.mass * (
-                    np.dot(v1com, v1com) + np.dot(v2com, v2com)
-                )
-                Erot_i = Er[p1] + Er[p2]
-                Etotal_i = Etrans_i + Erot_i
-
-                epsilon_tr_i = Etrans_i / Etotal_i
-                epsilon_rot_1_i = Er[p1] / Erot_i if Erot_i > 0 else 0.5
-
-                in_equilibration = t < equilibration_time
-
-                # Sample scattering angle
-                if in_equilibration:
-                    chi = sample_chi(p_chi_fn_eq, p_max_eq)
+                if sphere_mode:
+                    # Isotropic scattering + COR dissipation (mirrors Fortran collide.f90)
+                    eij = np.random.randn(3)
+                    eij /= np.linalg.norm(eij)
+                    vrel_vec = v1 - v2
+                    CR = np.dot(eij, vrel_vec)
+                    COR_PP = (alpha + 1.0) * 0.5
+                    vel[p1, :] = v1 - COR_PP * CR * eij
+                    vel[p2, :] = v2 + COR_PP * CR * eij
                 else:
-                    chi = sample_chi(p_chi_fn_target, p_max_target)
-                chi_rad = np.pi * chi
+                    vcom = (v1 + v2) * 0.5
+                    v1com = v1 - vcom
+                    v2com = v2 - vcom
 
-                # Rotational relaxation
-                theta = temp_ratio
-                if use_zr_eff:
-                    Zr_val = Z_R_eff_val
-                else:
-                    Zr_val = Zr(theta, eta=1.0, alpha=alpha)
-                P_r = min(1.0 / Zr_val, 0.5)  # cap so that 2*P_r never exceeds 1
+                    Etrans_i = 0.5 * params.mass * (
+                        np.dot(v1com, v1com) + np.dot(v2com, v2com)
+                    )
+                    Erot_i = Er[p1] + Er[p2]
+                    Etotal_i = Etrans_i + Erot_i
 
-                relax_p1 = False
-                relax_p2 = False
-                Rn = np.random.random()
-                if Rn < P_r:
-                    relax_p1 = True
-                elif Rn < 2.0 * P_r:
-                    relax_p2 = True
-                
-                # Apply relaxation
-                # theta2: GMM conditioning input. When Z_R_eff is used, fix at
-                # theta* so the exchange always samples from the steady-state
-                # correlated distribution. Otherwise track the current theta.
-                theta2 = gmm_theta2 if use_zr_eff else prepare_theta(temp_ratio)
+                    epsilon_tr_i = Etrans_i / Etotal_i
+                    epsilon_rot_1_i = Er[p1] / Erot_i if Erot_i > 0 else 0.5
 
-                if relax_p1:
-                    if alpha >= 1.0:
-                        # Analytical Borgnakke-Larsen: exact equipartition at equilibrium.
-                        # Beta(3/2, 1) has mean 3/5 = 0.6 (3 trans + 2 rot DOF).
-                        # Avoids GMM bias at theta=1 that drives theta* below 1.
-                        epsilon_tr_f = np.random.beta(2.0, 2.0)
-                        epsilon_rot_1_f = np.random.random()
-                        epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
+                    in_equilibration = t < equilibration_time
+
+                    # Sample scattering angle
+                    if in_equilibration:
+                        chi = sample_chi(p_chi_fn_eq, p_max_eq)
                     else:
-                        sample = models.cond_gmm.sample_conditionals(
-                            r=theta2, e_tr=epsilon_tr_i,
-                            e_r1=epsilon_rot_1_i, n_samples=1
-                        )
-                        epsilon_tr_f = sample[0, 0]
-                        epsilon_rot_1_f = sample[0, 1]
+                        chi = sample_chi(p_chi_fn_target, p_max_target)
+                    chi_rad = np.pi * chi
+
+                    # Rotational relaxation
+                    theta = temp_ratio
+                    if use_zr_eff:
+                        Zr_val = Z_R_eff_val
+                    else:
+                        Zr_val = Zr(theta, eta=1.0, alpha=alpha)
+                    P_r = min(1.0 / Zr_val, 0.5)  # cap so that 2*P_r never exceeds 1
+
+                    relax_p1 = False
+                    relax_p2 = False
+                    Rn = np.random.random()
+                    if Rn < P_r:
+                        relax_p1 = True
+                    elif Rn < 2.0 * P_r:
+                        relax_p2 = True
+
+                    # theta2: GMM conditioning input. When Z_R_eff is used, fix at
+                    # theta* so the exchange always samples from the steady-state
+                    # correlated distribution. Otherwise track the current theta.
+                    theta2 = gmm_theta2 if use_zr_eff else prepare_theta(temp_ratio)
+
+                    if relax_p1:
+                        if alpha >= 1.0:
+                            # Analytical Borgnakke-Larsen: exact equipartition at equilibrium.
+                            # Beta(3/2, 1) has mean 3/5 = 0.6 (3 trans + 2 rot DOF).
+                            # Avoids GMM bias at theta=1 that drives theta* below 1.
+                            epsilon_tr_f = np.random.beta(2.0, 2.0)
+                            epsilon_rot_1_f = np.random.random()
+                            epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
+                        else:
+                            sample = models.cond_gmm.sample_conditionals(
+                                r=theta2, e_tr=epsilon_tr_i,
+                                e_r1=epsilon_rot_1_i, n_samples=1
+                            )
+                            epsilon_tr_f = sample[0, 0]
+                            epsilon_rot_1_f = sample[0, 1]
+                            epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
+
+                    elif relax_p2:
+                        if alpha >= 1.0:
+                            # Analytical Borgnakke-Larsen (same draw, p1/p2 roles swapped)
+                            epsilon_tr_f = np.random.beta(2.0, 2.0)
+                            epsilon_rot_2_f = np.random.random()
+                            epsilon_rot_1_f = 1.0 - epsilon_rot_2_f
+                        else:
+                            sample = models.cond_gmm.sample_conditionals(
+                                r=theta2, e_tr=epsilon_tr_i,
+                                e_r1=epsilon_rot_1_i, n_samples=1
+                            )
+                            epsilon_tr_f = sample[0, 0]
+                            epsilon_rot_2_f = sample[0, 1]
+                            epsilon_rot_1_f = 1.0 - epsilon_rot_2_f
+
+                    else:
+                        # Elastic: no T-R exchange, preserve individual rotational energies
+                        epsilon_tr_f = epsilon_tr_i
+                        epsilon_rot_1_f = Er[p1] / Erot_i if Erot_i > 1e-30 else 0.5
                         epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
 
-                elif relax_p2:
-                    if alpha >= 1.0:
-                        # Analytical Borgnakke-Larsen (same draw, p1/p2 roles swapped)
-                        epsilon_tr_f = np.random.beta(2.0, 2.0)
-                        epsilon_rot_2_f = np.random.random()
-                        epsilon_rot_1_f = 1.0 - epsilon_rot_2_f
+                    # Dissipation
+                    if in_equilibration or gamma_max <= 0.0:
+                        gamma = 0.0
                     else:
-                        sample = models.cond_gmm.sample_conditionals(
-                            r=theta2, e_tr=epsilon_tr_i,
-                            e_r1=epsilon_rot_1_i, n_samples=1
-                        )
-                        epsilon_tr_f = sample[0, 0]
-                        epsilon_rot_2_f = sample[0, 1]
-                        epsilon_rot_1_f = 1.0 - epsilon_rot_2_f
+                        gamma = sample_dissp(beta_a, beta_b)
+                        gamma = gamma * gamma_max * prob_one_hit
 
-                else:
-                    # Elastic: no T-R exchange, preserve individual rotational energies
-                    epsilon_tr_f = epsilon_tr_i
-                    epsilon_rot_1_f = Er[p1] / Erot_i if Erot_i > 1e-30 else 0.5
-                    epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
-                    
-                # Dissipation
-                if in_equilibration or gamma_max <= 0.0:
-                    gamma = 0.0
-                else:
-                    gamma = sample_dissp(beta_a, beta_b)
-                    gamma = gamma * gamma_max * prob_one_hit
+                    _theta = max(temp_ratio, 1e-10)
+                    f_tr = C_alpha * 3.0 * _theta / (3.0 * _theta + 2.0)
 
-                _theta = max(temp_ratio, 1e-10)
-                f_tr = C_alpha * 3.0 * _theta / (3.0 * _theta + 2.0)
+                    delta_E = gamma * Etotal_i
+                    Etrans_f = epsilon_tr_f * Etotal_i - f_tr * delta_E
+                    Erot_f   = (1.0 - epsilon_tr_f) * Etotal_i - (1.0 - f_tr) * delta_E
 
-                delta_E = gamma * Etotal_i
-                Etrans_f = epsilon_tr_f * Etotal_i - f_tr * delta_E
-                Erot_f   = (1.0 - epsilon_tr_f) * Etotal_i - (1.0 - f_tr) * delta_E
+                    # Physical guard: negative energy is unphysical even if f_tr < 0
+                    # Redistribute the violation back
+                    if Etrans_f < 0:
+                        Erot_f += Etrans_f   # transfer the overshoot to rotation
+                        Etrans_f = 1e-30
+                    if Erot_f < 0:
+                        Etrans_f += Erot_f
+                        Erot_f = 1e-30
 
-                # Physical guard: negative energy is unphysical even if f_tr < 0
-                # Redistribute the violation back
-                if Etrans_f < 0:
-                    Erot_f += Etrans_f   # transfer the overshoot to rotation
-                    Etrans_f = 1e-30
-                if Erot_f < 0:
-                    Etrans_f += Erot_f
-                    Erot_f = 1e-30
+                    Er[p1] = epsilon_rot_1_f * Erot_f
+                    Er[p2] = epsilon_rot_2_f * Erot_f
 
-                Er[p1] = epsilon_rot_1_f * Erot_f
-                Er[p2] = epsilon_rot_2_f * Erot_f
+                    cr_new = np.sqrt(Etrans_f * params.omass)
+                    cr_new = max(cr_new, 1e-14)
 
-                cr_new = np.sqrt(Etrans_f * params.omass)
-                cr_new = max(cr_new, 1e-14)
-
-                RR = np.random.random()
-                eps = 2 * np.pi * RR
-                vel[p1, :], vel[p2, :] = update_velocities(
-                    vel[p1, :], vel[p2, :], chi_rad, eps, cr_new
-                )
+                    RR = np.random.random()
+                    eps = 2 * np.pi * RR
+                    vel[p1, :], vel[p2, :] = update_velocities(
+                        vel[p1, :], vel[p2, :], chi_rad, eps, cr_new
+                    )
 
                 # Collisional pressure accumulation.
                 # v1, v2 are pre-collision (saved above); vel[p1,:] is now post-collision.

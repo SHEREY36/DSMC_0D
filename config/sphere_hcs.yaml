@@ -1,0 +1,71 @@
+particle:
+  AR: 1.0
+  radius: 0.5
+  mass: 1.0
+  sigma_c_scale: 1.0        # unused when sphere_collision=true (exact pi*d^2 is used)
+
+system:
+  kTt: 1.0
+  kTr: 1.0                  # unused for spheres but kept for config compatibility
+  alpha: 0.9
+  eta: 1.0
+  phi: 0.01
+  domain: [200, 200, 200]
+  C_alpha: null
+
+time:
+  dt: 0.01
+  dtau: 0.1
+  t_end: 200
+  equilibration_time: 0.0
+
+flow:
+  mode: hcs
+  shear_rate: 0.0
+
+simulation:
+  seeds: [42]
+  output_dir: results/spheres/
+  use_zr_eff: false
+  sphere_collision: true
+
+preprocessing:
+  ctc_data_dir: CTC_data/
+  gmm:
+    base_dir: CTC_data/GMM/AR11
+    n_components: 32
+    max_components_bic: 40
+    r_range_start: 1
+    r_range_end: 13
+    gmm_cond_file: models/gmm_cond_AR20.npz
+  scattering:
+    alpha_dirs: [60, 65, 70, 75, 80, 85, 90, 95, 100]
+    ar_dirs: [10, 15, 20, 25, 30, 40]
+    polynomial_K: 4
+    polynomial_M: 2
+    polynomial_N: 2
+    beta: 0.5
+  dissipation:
+    beta_a: 1.21
+    beta_b: 3.67
+  ftr:
+    results_root: results2/results
+    alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+    r: 1.0
+    AR: 2.0
+    ftr_params_file: models/ftr_params_AR20_r100.json
+  zr_eff:
+    lammps_root: LAMMPS_data/Equal/Calibrate_r/modeB_e_sweep2
+    alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+    AR: 2.0
+    N_part: 40000
+    zr_eff_table_file: models/zr_eff_table_AR20.json
+  model_output_dir: models/
+
+postprocessing:
+  results_dir: results/spheres/
+  figures_dir: figures/spheres/
+
+calibration:
+  C_alpha_table_file: models/C_alpha_table_AR20.json
+  theta_target_table_file: models/theta_target_table_AR20.json

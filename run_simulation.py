@@ -20,11 +20,16 @@ def main():
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
-    model_dir = config['preprocessing']['model_output_dir']
-    gmm_npz = config['preprocessing']['gmm'].get('gmm_cond_file')
-    ftr_path = config['preprocessing'].get('ftr', {}).get('ftr_params_file')
-    print(f"Loading models from {model_dir}...")
-    models = CollisionModels(model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path)
+    sphere_mode = config.get('simulation', {}).get('sphere_collision', False)
+    if sphere_mode:
+        print("Sphere collision mode: skipping empirical model loading.")
+        models = None
+    else:
+        model_dir = config['preprocessing']['model_output_dir']
+        gmm_npz = config['preprocessing']['gmm'].get('gmm_cond_file')
+        ftr_path = config['preprocessing'].get('ftr', {}).get('ftr_params_file')
+        print(f"Loading models from {model_dir}...")
+        models = CollisionModels(model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path)
 
     run_all_realizations(config, models)
     print("All realizations complete.")
