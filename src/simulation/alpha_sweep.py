@@ -198,10 +198,13 @@ def _run_single_seed(task):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
-    model_dir = config["preprocessing"]["model_output_dir"]
-    gmm_npz = config["preprocessing"]["gmm"].get("gmm_cond_file")
-    ftr_path = config["preprocessing"].get("ftr", {}).get("ftr_params_file")
-    models = CollisionModels(model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path)
+    if config.get("simulation", {}).get("sphere_collision", False):
+        models = None
+    else:
+        model_dir = config["preprocessing"]["model_output_dir"]
+        gmm_npz = config["preprocessing"]["gmm"].get("gmm_cond_file")
+        ftr_path = config["preprocessing"].get("ftr", {}).get("ftr_params_file")
+        models = CollisionModels(model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path)
 
     AR = config["particle"]["AR"]
     alpha = config["system"]["alpha"]

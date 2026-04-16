@@ -1,0 +1,104 @@
+particle:
+  AR: 1.0
+  radius: 0.5
+  mass: 1.0
+  sigma_c_scale: 1.0        # unused when sphere_collision=true
+
+system:
+  kTt: 1.0
+  kTr: 1.0
+  alpha: 1.0
+  eta: 1.0
+  phi: 0.01
+  domain: [200, 200, 200]
+  C_alpha: null
+
+time:
+  dt: 0.01
+  dtau: 0.1
+  t_end: 2000
+  equilibration_time: 0.0
+
+flow:
+  mode: usf
+  shear_rate: 0.08
+
+simulation:
+  seeds: [42, 123, 456, 789]
+  output_dir: runs/AR1_usf_sweep/results/
+  use_zr_eff: false
+  sphere_collision: true
+
+preprocessing:
+  ctc_data_dir: CTC_data/
+  gmm:
+    base_dir: CTC_data/GMM/AR11
+    n_components: 32
+    max_components_bic: 40
+    r_range_start: 1
+    r_range_end: 13
+    gmm_cond_file: models/gmm_cond_AR20.npz
+  scattering:
+    alpha_dirs: [60, 65, 70, 75, 80, 85, 90, 95, 100]
+    ar_dirs: [10, 15, 20, 25, 30, 40]
+    polynomial_K: 4
+    polynomial_M: 2
+    polynomial_N: 2
+    beta: 0.5
+  dissipation:
+    beta_a: 1.21
+    beta_b: 3.67
+  ftr:
+    results_root: results2/results
+    alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+    r: 1.0
+    AR: 2.0
+    ftr_params_file: models/ftr_params_AR20_r100.json
+  zr_eff:
+    lammps_root: LAMMPS_data/Equal/Calibrate_r/modeB_e_sweep2
+    alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+    AR: 2.0
+    N_part: 40000
+    zr_eff_table_file: models/zr_eff_table_AR20.json
+  model_output_dir: models/
+
+postprocessing:
+  results_dir: runs/AR1_usf_sweep/results/
+  figures_dir: runs/AR1_usf_sweep/figures/
+  sweep_root: runs/AR1_usf_sweep
+  sweep_figures_dir: runs/AR1_usf_sweep/figures
+  sweep_n_time_points: 1200
+  sweep_min_realizations: 1
+  reference_realization_index: 0
+  asymptotic_tail_fraction: 0.2
+  normalize_total_temperature: true
+  active_alphas: []
+  exclude_alphas: []
+
+calibration:
+  C_alpha_table_file: models/C_alpha_table_AR20.json
+  theta_target_table_file: models/theta_target_table_AR20.json
+
+calibration_sweep:
+  AR: 1.0
+  output_root: runs/AR1_usf_sweep
+  alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]
+  default_eta: 1.0
+  default_shear_rate: 0.08
+  shear_rates_by_alpha:       # same formula: gdot = 0.08*sqrt((1-alpha^2)/0.64)
+    0.50: 0.080
+    0.55: 0.0771
+    0.60: 0.0739
+    0.65: 0.0702
+    0.70: 0.0660
+    0.75: 0.0611
+    0.80: 0.0554
+    0.85: 0.0487
+    0.90: 0.0403
+    0.95: 0.0288
+    1.00: 0.010               # string instability; use early plateau only
+  active_alphas: []           # empty = run all
+  seeds: [42, 123, 456, 789]
+  t_end: 2000
+  equilibration_time: 0.0
+  parallel_workers: 5
