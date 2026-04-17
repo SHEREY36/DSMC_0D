@@ -12,7 +12,7 @@ def compute_pij_k(vel, mass, volsys):
     return (mass / volsys) * (vel.T @ vel)
 
 
-def accumulate_pij_c(pij_c_acc, v1_pre, v2_pre, v1_post, mass, vr):
+def accumulate_pij_c(pij_c_acc, v1_pre, v2_pre, v1_post, mass, vr, eij_override=None):
     """Accumulate collisional pressure contribution for one accepted collision.
 
     Parameters
@@ -23,6 +23,8 @@ def accumulate_pij_c(pij_c_acc, v1_pre, v2_pre, v1_post, mass, vr):
     v1_post   : (3,)  post-collision velocity of particle 1
     mass      : float — particle mass
     vr        : float — pre-collision relative speed |v2_pre - v1_pre|
+    eij_override : (3,)  optional override for collision-normal unit vector
+
 
     Convention (follows DSMC-NSP collide.f90):
       delta_v1 = v1_pre - v1_post          (velocity change = impulse / mass)
@@ -32,10 +34,14 @@ def accumulate_pij_c(pij_c_acc, v1_pre, v2_pre, v1_post, mass, vr):
     Only particle 1 is counted per pair (no 1/2 factor; consistent with
     DSMC-NSP which omits the factor and counts one particle per collision).
     """
-    if vr < 1e-14:
-        return
+    
     delta_v1 = v1_pre - v1_post
-    eij = (v2_pre - v1_pre) / vr
+    if eij_override is not None:
+        eij = eij_override
+    else:
+        if vr < 1e-14:
+            return
+        eij = (v2_pre - v1_pre) / vr    # only valid if eij = vrel direction
     pij_c_acc += mass * np.outer(delta_v1, eij)
 
 

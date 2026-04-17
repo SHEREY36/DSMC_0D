@@ -242,10 +242,11 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     eij = np.random.randn(3)
                     eij /= np.linalg.norm(eij)
                     vrel_vec = v1 - v2
-                    CR = np.dot(eij, vrel_vec)
+                    eij_coll = eij.copy()
+                    CR = np.dot(eij_coll, vrel_vec)
                     COR_PP = (alpha + 1.0) * 0.5
-                    vel[p1, :] = v1 - COR_PP * CR * eij
-                    vel[p2, :] = v2 + COR_PP * CR * eij
+                    vel[p1, :] = v1 - COR_PP * CR * eij_coll
+                    vel[p2, :] = v2 + COR_PP * CR * eij_coll
                 else:
                     vcom = (v1 + v2) * 0.5
                     v1com = v1 - vcom
@@ -365,7 +366,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
                 # Collisional pressure accumulation.
                 # v1, v2 are pre-collision (saved above); vel[p1,:] is now post-collision.
-                accumulate_pij_c(pij_c_acc, v1, v2, vel[p1, :], params.mass, vr)
+                accumulate_pij_c(pij_c_acc, v1, v2, vel[p1, :], params.mass, vr, eij_override=eij_coll)
 
             if vrmax < vrmax_temp:
                 vrmax = vrmax_temp
