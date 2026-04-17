@@ -705,6 +705,12 @@ def _generate_all_figures(dsmc_cases, lmp_sphcyl, lmp_spheres, kt,
     plot_dsmc_theta_diagnostics(dsmc_cases, out_dir / "dsmc_theta_diagnostics.png",
                                 time_label=time_label)
 
+    if dsmc_spheres and dsmc_spheres[0].get("t_series"):
+        print("Plotting sphere steady-state diagnostics...")
+        plot_steady_diagnostics(dsmc_spheres,
+                                out_dir / "sphere_steady_diagnostics.png",
+                                time_label=time_label)
+
     print("Plotting stress overlay...")
     plot_stress_overlay(dsmc_cases, lmp_sphcyl, lmp_spheres, kt,
                         out_dir / "stress_overlay_2x2.png",
