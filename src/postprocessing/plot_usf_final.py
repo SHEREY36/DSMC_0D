@@ -166,10 +166,11 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
     diag_t, diag_T, diag_theta = [], [], []
     diag_stats_start, diag_plateau_start = [], []
 
+    ar_tag = int(round(params.AR))
     n_seeds = len(cfg.get("simulation", {}).get("seeds", [None] * 4))
     for ri in range(1, n_seeds + 1):
-        tp = results_dir / f"AR2_COR{tag}_USF_R{ri}.txt"
-        pp = results_dir / f"AR2_COR{tag}_USF_R{ri}_pressure.txt"
+        tp = results_dir / f"AR{ar_tag}_COR{tag}_USF_R{ri}.txt"
+        pp = results_dir / f"AR{ar_tag}_COR{tag}_USF_R{ri}_pressure.txt"
         if not (tp.exists() and pp.exists()):
             continue
         try:
@@ -1343,8 +1344,9 @@ def main():
     parser.add_argument("--lammps-sphcyl",  default="LAMMPS_data/USF/sphcyl_USF_AR2")
     parser.add_argument("--lammps-spheres", default="LAMMPS_data/USF/spheres/dilute3a")
     parser.add_argument("--dsmc-spheres",   default="runs/Run_shear_NN",
-                        help="Path to NSP sphere DSMC sweep (Run_shear_NN format); "
-                             "pass empty string to skip.")
+                        help="Path to sphere DSMC sweep: either 0D format (alpha_NNN "
+                             "subdirs) or NSP Fortran format (integer subdirs). "
+                             "Pass empty string to skip.")
     parser.add_argument("--out-dir",        default=None)
     args = parser.parse_args()
 
@@ -1379,8 +1381,18 @@ def main():
     if args.dsmc_spheres:
         dsmc_sph_dir = Path(args.dsmc_spheres)
         if dsmc_sph_dir.exists():
+            # Auto-detect format: 0D sweep has alpha_NNN subdirs; NSP has integer subdirs
+            has_alpha_dirs = any(
+                d.is_dir() and d.name.startswith("alpha_")
+                for d in dsmc_sph_dir.iterdir()
+            )
             print("Loading DSMC sphere cases...")
-            dsmc_spheres = load_nsphere_dsmc_sweep(dsmc_sph_dir)
+            if has_alpha_dirs:
+                print("  Detected 0D sweep format (alpha_NNN subdirs).")
+                dsmc_spheres = load_all_dsmc(dsmc_sph_dir)
+            else:
+                print("  Detected NSP Fortran format (integer subdirs).")
+                dsmc_spheres = load_nsphere_dsmc_sweep(dsmc_sph_dir)
             print(f"  {len(dsmc_spheres)} cases: alpha = {[c['alpha'] for c in dsmc_spheres]}")
         else:
             print(f"  DSMC spheres dir not found: {dsmc_sph_dir} — skipping.")
