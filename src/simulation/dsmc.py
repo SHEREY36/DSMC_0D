@@ -197,7 +197,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
             if flow_mode == 'usf':
                 vel[:, 0] -= gdot * vel[:, 1] * dt
                 # Remove net bulk momentum introduced by drift
-                vel -= vel.mean(axis=0)
+                #vel -= vel.mean(axis=0)
 
             # Compute temperatures
             Ttrans = (2.0 * 0.5 * params.mass

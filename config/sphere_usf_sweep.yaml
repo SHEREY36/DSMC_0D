@@ -84,21 +84,21 @@ calibration_sweep:
   output_root: runs/AR1_usf_sweep
   alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]
   default_eta: 1.0
-  default_shear_rate: 0.08
-  shear_rates_by_alpha:       # same formula: gdot = 0.08*sqrt((1-alpha^2)/0.64)
-    0.50: 0.080
-    0.55: 0.0771
-    0.60: 0.0739
-    0.65: 0.0702
-    0.70: 0.0660
-    0.75: 0.0611
-    0.80: 0.0554
-    0.85: 0.0487
-    0.90: 0.0403
-    0.95: 0.0288
-    1.00: 0.010               # string instability; use early plateau only
+  default_shear_rate: 0.0502
+  t_end: 3000
+  shear_rates_by_alpha:       # corrected: gdot_prev/1.314 to match NTC→KT convention
+    0.50: 0.0609
+    0.55: 0.0587
+    0.60: 0.0562
+    0.65: 0.0534
+    0.70: 0.0502
+    0.75: 0.0465
+    0.80: 0.0422
+    0.85: 0.0371
+    0.90: 0.0307
+    0.95: 0.0219
+    1.00: 0.0076              # string instability; use early plateau only
   active_alphas: []           # empty = run all
   seeds: [42, 123, 456, 789]
-  t_end: 2000
   equilibration_time: 0.0
   parallel_workers: 5

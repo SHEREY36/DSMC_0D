@@ -123,7 +123,7 @@ def _zeta_0(alpha):
 
 
 def _a_steady(beta, zeta):
-    return np.sqrt((3 * zeta) / (2 * beta)) * (beta + zeta)
+    return np.sqrt((3 * zeta / (2 * beta)) * (beta + zeta))
 
 
 def garzo_dufty_spheres(alpha_arr):
@@ -135,7 +135,7 @@ def garzo_dufty_spheres(alpha_arr):
     Pyy = b / (b + z)
     Pzz = Pyy.copy()
     Pxy = -(b / (b + z)**2) * a_s
-    return dict(alpha=a, Pxx=Pxx, Pyy=Pyy, Pzz=Pzz, Pxy=Pxy)
+    return dict(alpha=a, Pxx=Pxx, Pyy=Pyy, Pzz=Pzz, Pxy=Pxy, a_star=a_s)
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +153,7 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
     phi = float(cfg["system"]["phi"])
     lx, ly, lz = cfg["system"]["domain"]
     volsys = float(lx * ly * lz)
+    gdot = float(cfg.get("flow", {}).get("shear_rate", 0.0))
 
     params = compute_particle_params(cfg)
     Np = math.ceil(phi * volsys / params.volume)
@@ -161,7 +162,7 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
     results_dir = case_dir / "results"
     tag = int(round(alpha * 100))
 
-    seed_pxx, seed_pyy, seed_pzz, seed_pxy, seed_theta = [], [], [], [], []
+    seed_pxx, seed_pyy, seed_pzz, seed_pxy, seed_theta, seed_T_tr_ss = [], [], [], [], [], []
     # per-seed data for diagnostics
     diag_t, diag_T, diag_theta = [], [], []
     diag_stats_start, diag_plateau_start = [], []
@@ -200,6 +201,7 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
 
         T_tr_ss  = float(np.mean(T_tr[mask_t]))
         T_rot_ss = float(np.mean(T_rot[mask_t]))
+        seed_T_tr_ss.append(T_tr_ss)
         denom = n_dsmc * T_tr_ss
 
         P_mean = np.mean(pij[mask_p], axis=0)
@@ -212,8 +214,16 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
     if not seed_pxx:
         return None
 
+    T_tr_ss_mean = float(np.mean(seed_T_tr_ss)) if seed_T_tr_ss else float("nan")
+    if T_tr_ss_mean > 0 and params.sigma_c > 0:
+        a_star = gdot / (n_dsmc * params.sigma_c * math.sqrt(T_tr_ss_mean))
+    else:
+        a_star = float("nan")
+
     return dict(
         alpha=alpha,
+        gdot=gdot,
+        a_star=a_star,
         Pxx_mean=float(np.mean(seed_pxx)),  Pxx_std=float(np.std(seed_pxx)),
         Pyy_mean=float(np.mean(seed_pyy)),  Pyy_std=float(np.std(seed_pyy)),
         Pzz_mean=float(np.mean(seed_pzz)),  Pzz_std=float(np.std(seed_pzz)),
@@ -291,6 +301,49 @@ def load_lammps_sphcyl(base_dir: Path, tail_frac: float = 0.30) -> list[dict]:
     return rows
 
 
+def _read_lammps_sphere_params(folder: Path):
+    """Read gdot, N_particles, box_length from in.usf and the associated data file.
+
+    Returns (gdot, N, L) — any may be None if parsing fails.
+    """
+    gdot = None
+    in_usf = folder / "in.usf"
+    if in_usf.exists():
+        with open(in_usf) as fh:
+            for line in fh:
+                if "variable" in line and "gdot" in line and "equal" in line:
+                    parts = line.split()
+                    for i, p in enumerate(parts):
+                        if p == "equal" and i + 1 < len(parts):
+                            try:
+                                gdot = float(parts[i + 1])
+                            except ValueError:
+                                pass
+                            break
+
+    N, L = None, None
+    data_files = list(folder.glob("*.data"))
+    if data_files:
+        with open(data_files[0]) as fh:
+            for line in fh:
+                stripped = line.strip()
+                if "atoms" in stripped and not stripped.startswith("#"):
+                    parts = stripped.split()
+                    try:
+                        N = int(parts[0])
+                    except (ValueError, IndexError):
+                        pass
+                elif "xlo xhi" in stripped:
+                    parts = stripped.split()
+                    try:
+                        L = float(parts[1]) - float(parts[0])
+                    except (ValueError, IndexError):
+                        pass
+                if N is not None and L is not None:
+                    break
+    return gdot, N, L
+
+
 def load_lammps_spheres(base_dir: Path, tail_frac: float = 0.30,
                         elastic_early_rows: int = 850) -> list[dict]:
     """Load LAMMPS sphere shear stats.
@@ -313,8 +366,25 @@ def load_lammps_spheres(base_dir: Path, tail_frac: float = 0.30,
             continue
         ss = np.atleast_2d(np.loadtxt(ss_path, comments="#"))
 
+        # Compute a* = gdot / (n sigma_c sqrt(T_ss)) where sigma_c = pi*d^2 = pi (d=1)
+        a_star = float("nan")
+        tp_path = folder / "temperature_stats.dat"
+        gdot_lmp, N_lmp, L_lmp = _read_lammps_sphere_params(folder)
+        if tp_path.exists() and gdot_lmp is not None and N_lmp is not None and L_lmp is not None:
+            try:
+                tmp = np.atleast_2d(np.loadtxt(tp_path, comments="#"))
+                if abs(e_val - 1.0) < 1e-3:
+                    T_ss = float(np.mean(tmp[:elastic_early_rows, 1]))
+                else:
+                    T_ss = _lammps_tail_mean(tmp[:, 1], tail_frac)
+                n_lmp = N_lmp / L_lmp**3
+                sigma_c_lmp = math.pi   # sphere: pi * d^2, d=1
+                if T_ss > 0:
+                    a_star = gdot_lmp / (n_lmp * sigma_c_lmp * math.sqrt(T_ss))
+            except Exception:
+                pass
+
         if abs(e_val - 1.0) < 1e-3:
-            # Elastic: use early plateau before string instability
             window = ss[:elastic_early_rows]
             rows.append(dict(
                 e=e_val,
@@ -322,6 +392,7 @@ def load_lammps_spheres(base_dir: Path, tail_frac: float = 0.30,
                 Pyy=float(np.mean(window[:, 2])),
                 Pzz=float(np.mean(window[:, 3])),
                 Pxy=float(np.mean(window[:, 4])),
+                a_star=a_star,
             ))
         else:
             rows.append(dict(
@@ -330,6 +401,7 @@ def load_lammps_spheres(base_dir: Path, tail_frac: float = 0.30,
                 Pyy=_lammps_tail_mean(ss[:, 2], tail_frac),
                 Pzz=_lammps_tail_mean(ss[:, 3], tail_frac),
                 Pxy=_lammps_tail_mean(ss[:, 4], tail_frac),
+                a_star=a_star,
             ))
     rows.sort(key=lambda r: r["e"])
     return rows
@@ -710,6 +782,11 @@ def _generate_all_figures(dsmc_cases, lmp_sphcyl, lmp_spheres, kt,
         plot_steady_diagnostics(dsmc_spheres,
                                 out_dir / "sphere_steady_diagnostics.png",
                                 time_label=time_label)
+
+    if dsmc_spheres:
+        print("Plotting stress vs a*...")
+        plot_stress_vs_astar(dsmc_spheres, lmp_spheres, kt,
+                             out_dir / "stress_vs_astar.png")
 
     print("Plotting stress overlay...")
     plot_stress_overlay(dsmc_cases, lmp_sphcyl, lmp_spheres, kt,
@@ -1335,6 +1412,103 @@ def plot_angvel_distribution(lmp_angvel: list[dict], out_path: Path):
         fontsize=10
     )
     fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# Figure 7: Stress vs reduced shear rate a*
+# ---------------------------------------------------------------------------
+
+def plot_stress_vs_astar(dsmc_spheres: list[dict],
+                          lmp_spheres: list[dict],
+                          kt: dict,
+                          out_path: Path):
+    """P*_xx and P*_xy vs a* (NTC convention) for sphere DSMC and LAMMPS.
+
+    KT curve is parameterised by alpha — x-axis is a*_KT_ss from GD formula.
+    Since a*_sim = a*_KT_ss × (NTC/KT rate ratio), the simulation points sit
+    at systematically higher a* than the KT curve x-coordinate.  After the
+    gamma_dot correction (dividing by the empirical ratio ~1.314), a*_sim
+    should track a*_KT_ss closely, and all datasets should follow the same
+    P*(a*) curve.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+
+    C_DSMC = "#2166AC"
+    C_LSP  = "#D95F02"
+    C_KT   = "#555555"
+    ms = 7.0
+
+    cmap = plt.get_cmap("plasma")
+
+    # --- build DSMC scatter (colour by alpha) ---
+    dsp_a     = np.array([c["alpha"]   for c in dsmc_spheres])
+    dsp_astar = np.array([c["a_star"]  for c in dsmc_spheres])
+    dsp_pxx   = np.array([c["Pxx_mean"] for c in dsmc_spheres])
+    dsp_pxy   = np.array([c["Pxy_mean"] for c in dsmc_spheres])
+    dsp_pxx_s = np.array([c["Pxx_std"]  for c in dsmc_spheres])
+    dsp_pxy_s = np.array([c["Pxy_std"]  for c in dsmc_spheres])
+
+    # --- build LAMMPS scatter ---
+    lsp_astar = np.array([r.get("a_star", float("nan")) for r in lmp_spheres])
+    lsp_pxx   = np.array([r["Pxx"] for r in lmp_spheres])
+    lsp_pxy   = np.array([r["Pxy"] for r in lmp_spheres])
+
+    amin, amax = (float(dsp_a.min()), float(dsp_a.max())) if len(dsp_a) > 0 else (0.5, 1.0)
+
+    for panel, (dsp_y, dsp_ys, lsp_y, kt_y, ylabel) in enumerate([
+        (dsp_pxx, dsp_pxx_s, lsp_pxx, kt["Pxx"], r"$P_{xx}^*$"),
+        (dsp_pxy, dsp_pxy_s, lsp_pxy, kt["Pxy"], r"$P_{xy}^*$"),
+    ]):
+        ax = axes[panel]
+
+        # DSMC points (colour by alpha)
+        sc = ax.scatter(dsp_astar, dsp_y, c=dsp_a, cmap="plasma",
+                        vmin=amin, vmax=amax, marker="o", s=ms**2,
+                        edgecolors="none", zorder=4, label="DSMC spheres")
+        ax.errorbar(dsp_astar, dsp_y, yerr=dsp_ys,
+                    fmt="none", ecolor=C_DSMC, elinewidth=0.8, alpha=0.6, zorder=3)
+
+        # LAMMPS points
+        valid = np.isfinite(lsp_astar)
+        if valid.any():
+            ax.scatter(lsp_astar[valid], lsp_y[valid],
+                       marker="^", s=ms**2, color=C_LSP, zorder=5,
+                       label="LAMMPS spheres")
+
+        # KT curve (parameterised by alpha; x = a*_KT_ss from GD)
+        ax.plot(kt["a_star"], kt_y, "-", color=C_KT, lw=1.5, zorder=1,
+                label="KT (GD, a*_KT_ss)")
+
+        ax.set_xlabel(r"$a^* = \dot\gamma\,/\,(n\,\sigma_c\,\sqrt{T})$  [NTC units]",
+                      fontsize=10)
+        ax.set_ylabel(ylabel, fontsize=11)
+        ax.tick_params(labelsize=9, direction="in", which="both", top=True, right=True)
+        ax.grid(True, ls="--", lw=0.4, alpha=0.45)
+
+        if panel == 0:
+            handles, labels = [], []
+            handles.append(plt.Line2D([], [], marker="o", color=C_DSMC,
+                                      linestyle="none", label="DSMC spheres"))
+            if valid.any():
+                handles.append(plt.Line2D([], [], marker="^", color=C_LSP,
+                                          linestyle="none", label="LAMMPS spheres"))
+            handles.append(plt.Line2D([], [], color=C_KT, lw=1.5,
+                                      label="KT (GD, a*_KT_ss)"))
+            ax.legend(handles=handles, fontsize=9, loc="best")
+
+    cbar = fig.colorbar(sc, ax=axes.ravel().tolist(),
+                        orientation="vertical", fraction=0.025, pad=0.04)
+    cbar.set_label(r"$\alpha$", fontsize=10)
+
+    fig.suptitle(
+        r"Reduced stress vs $a^*$ — sphere USF  "
+        r"(KT x-axis in GD convention; sim x-axis in NTC convention)",
+        fontsize=10
+    )
+    fig.tight_layout(rect=[0, 0, 0.93, 1.0])
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved: {out_path}")
