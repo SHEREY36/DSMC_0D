@@ -206,14 +206,10 @@ def run_simulation(config, models, seed, output_path, pressure_path):
             temp_ratio = Ttrans / Trot if Trot > 0.0 else 1.0
 
             # NTC collision selection.
-            # Sphere mode uses 2× candidates: acceptance criterion |CR| < vrmax*R
-            # accepts ~half as often as |g| < vrmax*R since <|CR|> ≈ <|g|>/2.
-            if sphere_mode:
-                totalSel = (2.0 * float(Np) * float(Np - 1)
-                            * params.sigma_c * vrmax * ovol * halfdt)
-            else:
-                totalSel = (float(Np) * float(Np - 1)
-                            * params.sigma_c * vrmax * ovol * halfdt)
+            # Both sphere and spherocylinder use 2× candidates because acceptance
+            # is on |CR| = |eij · g|, and <|CR|> ≈ <|g|>/2.
+            totalSel = (2.0 * float(Np) * float(Np - 1)
+                        * params.sigma_c * vrmax * ovol * halfdt)
 
             RR = np.random.rand()
             totalSel = np.floor(totalSel + RR)
@@ -263,17 +259,27 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                                      eij_override=eij)
 
                 else:
-                    # Spherocylinder: standard Bird NTC, accept on |g|
-                    vr = np.linalg.norm(vrel_vec)
+                    # Spherocylinder: NTC with |σ̂·g| acceptance.
+                    # Draw line-of-centers eij FIRST (isotropic under molecular chaos),
+                    # accept on |CR| = |eij · g| — positional flux weight.
+                    eij = np.random.randn(3)
+                    eij /= np.linalg.norm(eij)
+                    CR = np.dot(eij, vrel_vec)
+                    abs_CR = abs(CR)
 
-                    if vr >= vrmax_temp:
-                        vrmax_temp = vr
+                    if abs_CR >= vrmax_temp:
+                        vrmax_temp = abs_CR
 
                     RR = np.random.random()
-                    if vr < vrmax * RR:
+                    if abs_CR < vrmax * RR:
                         continue
 
+                    # Ensure eij points in approaching direction
+                    if CR < 0:
+                        eij = -eij
+
                     NColl += 2
+                    vr = np.linalg.norm(vrel_vec)  # still needed for energy machinery
 
                     vcom = (v1 + v2) * 0.5
                     v1com = v1 - vcom
@@ -390,7 +396,8 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     vel[p1, :], vel[p2, :] = update_velocities(
                         vel[p1, :], vel[p2, :], chi_rad, eps, cr_new
                     )
-                    accumulate_pij_c(pij_c_acc, v1, v2, vel[p1, :], params.mass, vr)
+                    accumulate_pij_c(pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
+                                     eij_override=eij)
 
             if vrmax < vrmax_temp:
                 vrmax = vrmax_temp
