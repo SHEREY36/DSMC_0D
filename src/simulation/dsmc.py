@@ -205,9 +205,15 @@ def run_simulation(config, models, seed, output_path, pressure_path):
             Trot = np.sum(Er) / float(Np)
             temp_ratio = Ttrans / Trot if Trot > 0.0 else 1.0
 
-            # NTC collision selection
-            totalSel = (float(Np) * float(Np - 1)
-                        * params.sigma_c * vrmax * ovol * halfdt)
+            # NTC collision selection.
+            # Sphere mode uses 2× candidates: acceptance criterion |CR| < vrmax*R
+            # accepts ~half as often as |g| < vrmax*R since <|CR|> ≈ <|g|>/2.
+            if sphere_mode:
+                totalSel = (2.0 * float(Np) * float(Np - 1)
+                            * params.sigma_c * vrmax * ovol * halfdt)
+            else:
+                totalSel = (float(Np) * float(Np - 1)
+                            * params.sigma_c * vrmax * ovol * halfdt)
 
             RR = np.random.rand()
             totalSel = np.floor(totalSel + RR)
@@ -225,29 +231,50 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
                 v1 = vel[p1, :]
                 v2 = vel[p2, :]
-                vr = np.linalg.norm(v2 - v1)
-
-                if vr >= vrmax_temp:
-                    vrmax_temp = vr
-
-                # Accept/reject
-                RR = np.random.random()
-                if vr < vrmax * RR:
-                    continue
-
-                NColl += 2
+                vrel_vec = v1 - v2
 
                 if sphere_mode:
-                    # Isotropic scattering + COR dissipation (mirrors Fortran collide.f90)
+                    # Hard-sphere NTC: draw line-of-centers eij BEFORE acceptance.
+                    # Accept on |CR| = |eij · g| — cosine-weighted sampling on the
+                    # approaching hemisphere (correct hard-sphere collision kernel).
                     eij = np.random.randn(3)
                     eij /= np.linalg.norm(eij)
-                    vrel_vec = v1 - v2
-                    eij_coll = eij.copy()
-                    CR = np.dot(eij_coll, vrel_vec)
+                    CR = np.dot(eij, vrel_vec)
+                    abs_CR = abs(CR)
+
+                    if abs_CR >= vrmax_temp:
+                        vrmax_temp = abs_CR
+
+                    RR = np.random.random()
+                    if abs_CR < vrmax * RR:
+                        continue
+
+                    # Ensure eij points in approaching direction (CR > 0)
+                    if CR < 0:
+                        eij = -eij
+                        CR = -CR
+
+                    NColl += 2
                     COR_PP = (alpha + 1.0) * 0.5
-                    vel[p1, :] = v1 - COR_PP * CR * eij_coll
-                    vel[p2, :] = v2 + COR_PP * CR * eij_coll
+                    vel[p1, :] = v1 - COR_PP * CR * eij
+                    vel[p2, :] = v2 + COR_PP * CR * eij
+                    vr = np.linalg.norm(vrel_vec)
+                    accumulate_pij_c(pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
+                                     eij_override=eij)
+
                 else:
+                    # Spherocylinder: standard Bird NTC, accept on |g|
+                    vr = np.linalg.norm(vrel_vec)
+
+                    if vr >= vrmax_temp:
+                        vrmax_temp = vr
+
+                    RR = np.random.random()
+                    if vr < vrmax * RR:
+                        continue
+
+                    NColl += 2
+
                     vcom = (v1 + v2) * 0.5
                     v1com = v1 - vcom
                     v2com = v2 - vcom
@@ -363,10 +390,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     vel[p1, :], vel[p2, :] = update_velocities(
                         vel[p1, :], vel[p2, :], chi_rad, eps, cr_new
                     )
-
-                # Collisional pressure accumulation.
-                # v1, v2 are pre-collision (saved above); vel[p1,:] is now post-collision.
-                accumulate_pij_c(pij_c_acc, v1, v2, vel[p1, :], params.mass, vr, eij_override=eij_coll)
+                    accumulate_pij_c(pij_c_acc, v1, v2, vel[p1, :], params.mass, vr)
 
             if vrmax < vrmax_temp:
                 vrmax = vrmax_temp
