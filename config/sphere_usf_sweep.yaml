@@ -87,16 +87,16 @@ calibration_sweep:
   default_shear_rate: 0.0502
   t_end: 3000
   shear_rates_by_alpha:       # corrected: gdot_prev/1.314 to match NTC→KT convention
-    0.50: 0.0609
-    0.55: 0.0587
-    0.60: 0.0562
-    0.65: 0.0534
-    0.70: 0.0502
-    0.75: 0.0465
-    0.80: 0.0422
-    0.85: 0.0371
-    0.90: 0.0307
-    0.95: 0.0219
+    0.50: 0.1099
+    0.55: 0.1046
+    0.60: 0.0987
+    0.65: 0.0924
+    0.70: 0.0854
+    0.75: 0.0778
+    0.80: 0.0694
+    0.85: 0.0598
+    0.90: 0.0486
+    0.95: 0.0341
     1.00: 0.0076              # string instability; use early plateau only
   active_alphas: []           # empty = run all
   seeds: [42, 123, 456, 789]
