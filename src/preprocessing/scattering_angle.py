@@ -205,3 +205,34 @@ def p_chi_AR_alpha(chi, AR, alpha, a_elastic_reshaped, a_inelastic_reshaped,
     delP = delta_p_model(chi, AR, alpha, a_inelastic_reshaped, M, N, K,
                          beta=beta)
     return P_el + delP
+
+
+def p_chi_mu_model(chi, mu, AR, alpha, a_elastic, a_inelastic,
+                   K, M, N, J_el, J_ie, beta=0.5):
+    """Evaluate P(chi | mu, AR, alpha) — mu-conditioned scattering PDF.
+
+    mu = |eij · g_hat| is the cosine of the angle between the collision normal
+    and the relative velocity direction, computed from NTC geometry.
+
+    a_elastic   shape (M+1, J_el+1, K+1): coefficients of AR^m * mu^j * chi^k
+    a_inelastic shape (M+1, N+1, J_ie+1, K+1): coefficients of AR^m * phi^n * mu^j * chi^k
+    """
+    chi = np.atleast_1d(np.asarray(chi, dtype=float))
+    phi = 1.0 - alpha ** beta
+    P = np.zeros_like(chi)
+    for m in range(M + 1):
+        AR_m = AR ** m
+        for j in range(J_el + 1):
+            mu_j = mu ** j
+            for k in range(K + 1):
+                P += a_elastic[m, j, k] * AR_m * mu_j * (chi ** k)
+    for m in range(M + 1):
+        AR_m = AR ** m
+        for n in range(N + 1):
+            phi_n = phi ** n
+            for j in range(J_ie + 1):
+                mu_j = mu ** j
+                for k in range(K + 1):
+                    P += a_inelastic[m, n, j, k] * AR_m * phi_n * mu_j * (chi ** k)
+    P = np.maximum(P, 0.0)
+    return P if P.size > 1 else float(P[0])

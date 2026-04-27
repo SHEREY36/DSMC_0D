@@ -2,7 +2,7 @@ import os
 import glob
 import numpy as np
 
-from src.preprocessing.scattering_angle import p_chi_AR_alpha
+from src.preprocessing.scattering_angle import p_chi_AR_alpha, p_chi_mu_model
 from src.preprocessing.gmm_energy import ConditionalGMM
 from src.preprocessing.dissipation import (
     load_table, lookup_gamma_max, lookup_one_hit, _interpolate_alpha_for_AR
@@ -55,6 +55,19 @@ class CollisionModels:
         self.scat_N = int(scat['N'])
         self.scat_K = int(scat['K'])
         self.scat_beta = float(scat['beta'])
+
+        # mu-conditioned scattering model (optional)
+        mu_scat_path = os.path.join(self.model_dir, "scattering_mu_coeffs.npz")
+        if os.path.exists(mu_scat_path):
+            mu_scat = np.load(mu_scat_path)
+            self.a_elastic_mu   = mu_scat['a_elastic']    # (M+1, J_el+1, K+1)
+            self.a_inelastic_mu = mu_scat['a_inelastic']  # (M+1, N+1, J_ie+1, K+1)
+            self.scat_J_el      = int(mu_scat['J_el'])
+            self.scat_J_ie      = int(mu_scat['J_ie'])
+            self.has_mu_model   = True
+            print(f"  Loaded mu-scattering model: {mu_scat_path}")
+        else:
+            self.has_mu_model = False
 
         # Lookup tables
         self.gamma_max_table = load_table(
@@ -171,6 +184,49 @@ def sample_chi(p_chi_fn, p_max, rng=np.random):
         chi_star = rng.uniform(0.0, 1.0)
         u = rng.uniform(0.0, p_max)
         if u <= p_chi_fn(chi_star):
+            return chi_star
+
+
+def init_p_chi_mu_distribution(AR, alpha, models):
+    """Pre-compute global p_max for mu-conditioned chi rejection sampling.
+
+    Scans a 2D (chi, mu) grid to find max P(chi | mu, AR, alpha).
+    Returns (p_chi_mu_fn, p_max):
+      p_chi_mu_fn(chi, mu)  evaluates the PDF at scalar mu, array/scalar chi.
+      p_max                 is valid for all chi ∈ [0,1], mu ∈ [0,1].
+    """
+    chi_vals = np.linspace(0, 1, 100)
+    mu_vals  = np.linspace(0, 1, 50)
+    p_max = 0.0
+    for mu in mu_vals:
+        p_vals = p_chi_mu_model(
+            chi_vals, mu, AR, alpha,
+            models.a_elastic_mu, models.a_inelastic_mu,
+            models.scat_K, models.scat_M, models.scat_N,
+            models.scat_J_el, models.scat_J_ie, models.scat_beta
+        )
+        p_max = max(p_max, float(np.max(p_vals)))
+    p_max *= 1.05
+
+    def p_chi_mu_fn(chi, mu):
+        return p_chi_mu_model(
+            chi, mu, AR, alpha,
+            models.a_elastic_mu, models.a_inelastic_mu,
+            models.scat_K, models.scat_M, models.scat_N,
+            models.scat_J_el, models.scat_J_ie, models.scat_beta
+        )
+    return p_chi_mu_fn, p_max
+
+
+def sample_chi_given_mu(p_chi_mu_fn, p_max, mu, rng=np.random):
+    """Sample chi from P(chi | mu, AR, alpha) via rejection sampling.
+
+    mu = |eij · g_hat| is the collision geometry variable from the NTC kernel.
+    Returns chi in [0, 1].
+    """
+    while True:
+        chi_star = rng.uniform(0.0, 1.0)
+        if rng.uniform(0.0, p_max) <= p_chi_mu_fn(chi_star, mu):
             return chi_star
 
 

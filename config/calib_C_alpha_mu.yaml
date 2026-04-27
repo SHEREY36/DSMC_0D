@@ -2,7 +2,7 @@ particle:
   AR: 2.0
   radius: 0.5
   mass: 1.0
-  sigma_c_scale: 1.020  # multiplicative correction to sigma_c; measured from DSMC vs LAMMPS tau slope ratio (mean over α=0.55–0.95)
+  sigma_c_scale: 1.020
 
 system:
   kTt: 1.0
@@ -11,7 +11,7 @@ system:
   eta: 1.0
   phi: 0.01
   domain: [200, 200, 200]
-  C_alpha: null  # if null, loaded from calibration.C_alpha_table_file; fallback 1.0
+  C_alpha: null
 
 time:
   dt: 0.01
@@ -20,16 +20,15 @@ time:
   equilibration_time: 0.0
 
 flow:
-  mode: hcs        # 'hcs' (Homogeneous Cooling State) or 'usf' (Uniform Simple Shear Flow)
-  shear_rate: 0.0  # gdot [1/tau_c]; only used when mode=usf
+  mode: hcs
+  shear_rate: 0.0
 
 simulation:
-  #seeds: [42, 123, 999, 2024, 777]
   seeds: [42]
   output_dir: results/
-  use_zr_eff: false  # true = fixed (theta*, Z_R_eff) from table; false = dynamic Zr(theta, eta)
-  sphere_collision: false  # true = sphere mode; bypasses all empirical sub-models
-  use_mu_scattering: false  # true = p(chi|mu,AR,alpha); mu=|eij·g_hat| from NTC geometry
+  use_zr_eff: false
+  sphere_collision: false
+  use_mu_scattering: true   # mu=|eij·g_hat| conditioned scattering
 
 preprocessing:
   ctc_data_dir: CTC_data/
@@ -39,8 +38,6 @@ preprocessing:
     max_components_bic: 40
     r_range_start: 1
     r_range_end: 13
-    # Pre-computed conditional GMM npz file for simulation.
-    # If not specified, auto-detects gmm_cond_*.npz in model_output_dir.
     gmm_cond_file: models/gmm_cond_AR20.npz
   scattering:
     alpha_dirs: [60, 65, 70, 75, 80, 85, 90, 95, 100]
@@ -80,7 +77,7 @@ postprocessing:
   exclude_alphas: [0.50, 0.55, 0.60]
 
 calibration:
-  C_alpha_table_file: models/C_alpha_table_AR20.json
+  C_alpha_table_file: models/C_alpha_table_AR20_mu.json
   theta_target_table_file: models/theta_target_table_AR20.json
 
 calibration_sweep:
@@ -88,7 +85,7 @@ calibration_sweep:
   output_root: runs/AR2_eta_sweep
   alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
   default_eta: 2.0
-  active_alphas: []  # Empty means run all prepared cases.
+  active_alphas: []
   seeds: [42]
   t_end: 300
   equilibration_time: 2.0

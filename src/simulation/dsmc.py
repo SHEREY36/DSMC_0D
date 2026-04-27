@@ -5,6 +5,7 @@ import numpy as np
 from .particle import compute_particle_params
 from .collision import (
     CollisionModels, init_p_chi_distribution, sample_chi,
+    init_p_chi_mu_distribution, sample_chi_given_mu,
     sample_dissp, update_velocities
 )
 from .pressure import compute_pij_k, accumulate_pij_c, normalise_pij_c
@@ -121,13 +122,18 @@ def run_simulation(config, models, seed, output_path, pressure_path):
             f"time.equilibration_time must be >= 0, got {equilibration_time}"
         )
 
+    use_mu_scattering = (
+        not sphere_mode
+        and models.has_mu_model
+        and config.get('simulation', {}).get('use_mu_scattering', False)
+    )
+
     # Scattering angle distribution — skipped in sphere mode (isotropic scattering)
     if not sphere_mode:
-        p_chi_fn_target, p_max_target = init_p_chi_distribution(
-            params.AR, alpha, models
-        )
+        _init_scat = init_p_chi_mu_distribution if use_mu_scattering else init_p_chi_distribution
+        p_chi_fn_target, p_max_target = _init_scat(params.AR, alpha, models)
         if equilibration_time > 0.0 and alpha < 1.0:
-            p_chi_fn_eq, p_max_eq = init_p_chi_distribution(params.AR, 1.0, models)
+            p_chi_fn_eq, p_max_eq = _init_scat(params.AR, 1.0, models)
         else:
             p_chi_fn_eq, p_max_eq = p_chi_fn_target, p_max_target
     else:
@@ -161,7 +167,8 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     else:
         print(f"  Np={Np}, eta={eta:.4f} (Zr), C_alpha={C_alpha:.4f}, "
               f"gamma_max={gamma_max:.6f}, prob_one_hit={prob_one_hit:.6f}, "
-              f"equilibration_time={equilibration_time:.3f}, {flow_str}")
+              f"mu_scat={use_mu_scattering}, equilibration_time={equilibration_time:.3f}, "
+              f"{flow_str}")
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w', buffering=1) as file, open(pressure_path, 'w', buffering=1) as pfile:
@@ -297,7 +304,12 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     in_equilibration = t < equilibration_time
 
                     # Sample scattering angle
-                    if in_equilibration:
+                    if use_mu_scattering:
+                        mu_geom = abs_CR / vr  # |eij · g_hat|
+                        _fn = p_chi_fn_eq if in_equilibration else p_chi_fn_target
+                        _pm = p_max_eq   if in_equilibration else p_max_target
+                        chi = sample_chi_given_mu(_fn, _pm, mu_geom)
+                    elif in_equilibration:
                         chi = sample_chi(p_chi_fn_eq, p_max_eq)
                     else:
                         chi = sample_chi(p_chi_fn_target, p_max_target)
