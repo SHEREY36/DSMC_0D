@@ -188,45 +188,59 @@ def sample_chi(p_chi_fn, p_max, rng=np.random):
 
 
 def init_p_chi_mu_distribution(AR, alpha, models):
-    """Pre-compute global p_max for mu-conditioned chi rejection sampling.
+    """Precompute the (mu, chi) PDF table for fast lookup during sampling.
 
-    Scans a 2D (chi, mu) grid to find max P(chi | mu, AR, alpha).
-    Returns (p_chi_mu_fn, p_max):
-      p_chi_mu_fn(chi, mu)  evaluates the PDF at scalar mu, array/scalar chi.
-      p_max                 is valid for all chi ∈ [0,1], mu ∈ [0,1].
+    Evaluates P(chi | mu, AR, alpha) once on a 200×100 (chi, mu) grid,
+    renormalizes each mu-row to integrate to 1 over chi, and stores
+    per-mu rejection envelopes.
+
+    Returns (chi_grid, mu_grid, P, p_max_per_mu):
+      chi_grid     shape (200,)
+      mu_grid      shape (100,)
+      P            shape (100, 200) — P[i, :] is the chi-PDF at mu_grid[i]
+      p_max_per_mu shape (100,)     — per-mu rejection ceiling (5% headroom)
     """
-    chi_vals = np.linspace(0, 1, 100)
-    mu_vals  = np.linspace(0, 1, 50)
-    p_max = 0.0
-    for mu in mu_vals:
-        p_vals = p_chi_mu_model(
-            chi_vals, mu, AR, alpha,
+    chi_grid = np.linspace(0.0, 1.0, 200)
+    mu_grid  = np.linspace(0.0, 1.0, 100)
+
+    P = np.zeros((len(mu_grid), len(chi_grid)))
+    for i, mu in enumerate(mu_grid):
+        P[i, :] = p_chi_mu_model(
+            chi_grid, mu, AR, alpha,
             models.a_elastic_mu, models.a_inelastic_mu,
             models.scat_K, models.scat_M, models.scat_N,
             models.scat_J_el, models.scat_J_ie, models.scat_beta
         )
-        p_max = max(p_max, float(np.max(p_vals)))
-    p_max *= 1.05
+    P = np.maximum(P, 0.0)
 
-    def p_chi_mu_fn(chi, mu):
-        return p_chi_mu_model(
-            chi, mu, AR, alpha,
-            models.a_elastic_mu, models.a_inelastic_mu,
-            models.scat_K, models.scat_M, models.scat_N,
-            models.scat_J_el, models.scat_J_ie, models.scat_beta
-        )
-    return p_chi_mu_fn, p_max
+    norms = np.trapz(P, chi_grid, axis=1)   # shape (100,)
+    P /= norms[:, None]
+
+    p_max_per_mu = P.max(axis=1) * 1.05     # shape (100,)
+
+    return chi_grid, mu_grid, P, p_max_per_mu
 
 
-def sample_chi_given_mu(p_chi_mu_fn, p_max, mu, rng=np.random):
-    """Sample chi from P(chi | mu, AR, alpha) via rejection sampling.
+def sample_chi_given_mu(chi_grid, mu_grid, P, p_max_per_mu, mu, rng=np.random):
+    """Sample chi from the precomputed P[mu, chi] table via rejection sampling.
 
-    mu = |eij · g_hat| is the collision geometry variable from the NTC kernel.
-    Returns chi in [0, 1].
+    Linear interpolation in mu between adjacent grid rows; nearest-neighbour in chi.
+    mu = |eij · g_hat| from the NTC kernel. Returns chi in [0, 1].
     """
+    n_mu  = len(mu_grid)
+    n_chi = len(chi_grid)
+
+    mu_f = mu * (n_mu - 1)
+    j    = int(np.clip(mu_f, 0, n_mu - 2))
+    w    = mu_f - j                                      # weight for upper row
+
+    pmax = (1.0 - w) * p_max_per_mu[j] + w * p_max_per_mu[j + 1]
+
     while True:
         chi_star = rng.uniform(0.0, 1.0)
-        if rng.uniform(0.0, p_max) <= p_chi_mu_fn(chi_star, mu):
+        k        = int(chi_star * (n_chi - 1))
+        P_at     = (1.0 - w) * P[j, k] + w * P[j + 1, k]
+        if rng.uniform(0.0, pmax) <= P_at:
             return chi_star
 
 

@@ -130,14 +130,23 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
     # Scattering angle distribution — skipped in sphere mode (isotropic scattering)
     if not sphere_mode:
-        _init_scat = init_p_chi_mu_distribution if use_mu_scattering else init_p_chi_distribution
-        p_chi_fn_target, p_max_target = _init_scat(params.AR, alpha, models)
-        if equilibration_time > 0.0 and alpha < 1.0:
-            p_chi_fn_eq, p_max_eq = _init_scat(params.AR, 1.0, models)
+        if use_mu_scattering:
+            scat_tbl_target = init_p_chi_mu_distribution(params.AR, alpha, models)
+            if equilibration_time > 0.0 and alpha < 1.0:
+                scat_tbl_eq = init_p_chi_mu_distribution(params.AR, 1.0, models)
+            else:
+                scat_tbl_eq = scat_tbl_target
+            p_chi_fn_target = p_max_target = p_chi_fn_eq = p_max_eq = None
         else:
-            p_chi_fn_eq, p_max_eq = p_chi_fn_target, p_max_target
+            p_chi_fn_target, p_max_target = init_p_chi_distribution(params.AR, alpha, models)
+            if equilibration_time > 0.0 and alpha < 1.0:
+                p_chi_fn_eq, p_max_eq = init_p_chi_distribution(params.AR, 1.0, models)
+            else:
+                p_chi_fn_eq, p_max_eq = p_chi_fn_target, p_max_target
+            scat_tbl_target = scat_tbl_eq = None
     else:
         p_chi_fn_target = p_max_target = p_chi_fn_eq = p_max_eq = None
+        scat_tbl_target = scat_tbl_eq = None
 
     # Initialize particles
     vel, omega, Er = initialize_particles(
@@ -306,9 +315,8 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     # Sample scattering angle
                     if use_mu_scattering:
                         mu_geom = abs_CR / vr  # |eij · g_hat|
-                        _fn = p_chi_fn_eq if in_equilibration else p_chi_fn_target
-                        _pm = p_max_eq   if in_equilibration else p_max_target
-                        chi = sample_chi_given_mu(_fn, _pm, mu_geom)
+                        tbl = scat_tbl_eq if in_equilibration else scat_tbl_target
+                        chi = sample_chi_given_mu(*tbl, mu_geom)
                     elif in_equilibration:
                         chi = sample_chi(p_chi_fn_eq, p_max_eq)
                     else:
