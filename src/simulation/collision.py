@@ -213,7 +213,7 @@ def init_p_chi_mu_distribution(AR, alpha, models):
         )
     P = np.maximum(P, 0.0)
 
-    norms = np.trapz(P, chi_grid, axis=1)   # shape (100,)
+    norms = 0.5 * np.sum((P[:, :-1] + P[:, 1:]) * np.diff(chi_grid), axis=1)
     P /= norms[:, None]
 
     p_max_per_mu = P.max(axis=1) * 1.05     # shape (100,)
