@@ -29,7 +29,6 @@ simulation:
   output_dir: results/
   use_zr_eff: false  # true = fixed (theta*, Z_R_eff) from table; false = dynamic Zr(theta, eta)
   sphere_collision: false  # true = sphere mode; bypasses all empirical sub-models
-  use_mu_scattering: false  # true = p(chi|mu,AR,alpha); mu=|eij·g_hat| from NTC geometry
 
 preprocessing:
   ctc_data_dir: CTC_data/

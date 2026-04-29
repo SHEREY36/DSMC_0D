@@ -2,7 +2,7 @@ import os
 import glob
 import numpy as np
 
-from src.preprocessing.scattering_angle import p_chi_AR_alpha, p_chi_mu_model
+from src.preprocessing.scattering_angle import p_chi_AR_alpha
 from src.preprocessing.gmm_energy import ConditionalGMM
 from src.preprocessing.dissipation import (
     load_table, lookup_gamma_max, lookup_one_hit, _interpolate_alpha_for_AR
@@ -55,19 +55,6 @@ class CollisionModels:
         self.scat_N = int(scat['N'])
         self.scat_K = int(scat['K'])
         self.scat_beta = float(scat['beta'])
-
-        # mu-conditioned scattering model (optional)
-        mu_scat_path = os.path.join(self.model_dir, "scattering_mu_coeffs.npz")
-        if os.path.exists(mu_scat_path):
-            mu_scat = np.load(mu_scat_path)
-            self.a_elastic_mu   = mu_scat['a_elastic']    # (M+1, J_el+1, K+1)
-            self.a_inelastic_mu = mu_scat['a_inelastic']  # (M+1, N+1, J_ie+1, K+1)
-            self.scat_J_el      = int(mu_scat['J_el'])
-            self.scat_J_ie      = int(mu_scat['J_ie'])
-            self.has_mu_model   = True
-            print(f"  Loaded mu-scattering model: {mu_scat_path}")
-        else:
-            self.has_mu_model = False
 
         # Lookup tables
         self.gamma_max_table = load_table(
@@ -184,63 +171,6 @@ def sample_chi(p_chi_fn, p_max, rng=np.random):
         chi_star = rng.uniform(0.0, 1.0)
         u = rng.uniform(0.0, p_max)
         if u <= p_chi_fn(chi_star):
-            return chi_star
-
-
-def init_p_chi_mu_distribution(AR, alpha, models):
-    """Precompute the (mu, chi) PDF table for fast lookup during sampling.
-
-    Evaluates P(chi | mu, AR, alpha) once on a 200×100 (chi, mu) grid,
-    renormalizes each mu-row to integrate to 1 over chi, and stores
-    per-mu rejection envelopes.
-
-    Returns (chi_grid, mu_grid, P, p_max_per_mu):
-      chi_grid     shape (200,)
-      mu_grid      shape (100,)
-      P            shape (100, 200) — P[i, :] is the chi-PDF at mu_grid[i]
-      p_max_per_mu shape (100,)     — per-mu rejection ceiling (5% headroom)
-    """
-    chi_grid = np.linspace(0.0, 1.0, 200)
-    mu_grid  = np.linspace(0.0, 1.0, 100)
-
-    P = np.zeros((len(mu_grid), len(chi_grid)))
-    for i, mu in enumerate(mu_grid):
-        P[i, :] = p_chi_mu_model(
-            chi_grid, mu, AR, alpha,
-            models.a_elastic_mu, models.a_inelastic_mu,
-            models.scat_K, models.scat_M, models.scat_N,
-            models.scat_J_el, models.scat_J_ie, models.scat_beta
-        )
-    P = np.maximum(P, 0.0)
-
-    norms = 0.5 * np.sum((P[:, :-1] + P[:, 1:]) * np.diff(chi_grid), axis=1)
-    P /= norms[:, None]
-
-    p_max_per_mu = P.max(axis=1) * 1.05     # shape (100,)
-
-    return chi_grid, mu_grid, P, p_max_per_mu
-
-
-def sample_chi_given_mu(chi_grid, mu_grid, P, p_max_per_mu, mu, rng=np.random):
-    """Sample chi from the precomputed P[mu, chi] table via rejection sampling.
-
-    Linear interpolation in mu between adjacent grid rows; nearest-neighbour in chi.
-    mu = |eij · g_hat| from the NTC kernel. Returns chi in [0, 1].
-    """
-    n_mu  = len(mu_grid)
-    n_chi = len(chi_grid)
-
-    mu_f = mu * (n_mu - 1)
-    j    = int(np.clip(mu_f, 0, n_mu - 2))
-    w    = mu_f - j                                      # weight for upper row
-
-    pmax = (1.0 - w) * p_max_per_mu[j] + w * p_max_per_mu[j + 1]
-
-    while True:
-        chi_star = rng.uniform(0.0, 1.0)
-        k        = int(chi_star * (n_chi - 1))
-        P_at     = (1.0 - w) * P[j, k] + w * P[j + 1, k]
-        if rng.uniform(0.0, pmax) <= P_at:
             return chi_star
 
 
