@@ -102,11 +102,6 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         # C_alpha: config override takes priority, then table lookup, then 1.0
         C_alpha = config['system'].get('C_alpha') or models.get_C_alpha(alpha, params.AR)
 
-    usf_ftr_correction = (
-        not sphere_mode
-        and config.get('simulation', {}).get('usf_ftr_correction', False)
-    )
-
     # Flow mode
     flow_mode = config.get('flow', {}).get('mode', 'hcs')
     gdot = float(config.get('flow', {}).get('shear_rate', 0.0))
@@ -375,19 +370,9 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                         gamma = gamma * gamma_max * prob_one_hit
 
                     _theta = max(temp_ratio, 1e-10)
-                    f_tr_hcs = C_alpha * 3.0 * _theta / (3.0 * _theta + 2.0)
+                    f_tr = C_alpha * 3.0 * _theta / (3.0 * _theta + 2.0)
 
                     delta_E = gamma * Etotal_i
-
-                    if usf_ftr_correction and flow_mode == 'usf' and gdot != 0.0 and NColl > 10 * Np:
-                        nu_coll = NColl / (Np * t)
-                        dt_free = 1.0 / nu_coll if nu_coll > 0.0 else dt
-                        dE_shear = -params.mass * gdot * (v1[0]*v1[1] + v2[0]*v2[1]) * dt_free
-                        f_tr_shear = dE_shear / delta_E if delta_E > 1e-30 else 0.0
-                        f_tr = float(np.clip(f_tr_hcs + f_tr_shear, 0.0, 1.0))
-                    else:
-                        f_tr = f_tr_hcs
-
                     Etrans_f = epsilon_tr_f * Etotal_i - f_tr * delta_E
                     Erot_f   = (1.0 - epsilon_tr_f) * Etotal_i - (1.0 - f_tr) * delta_E
 

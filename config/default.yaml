@@ -29,7 +29,6 @@ simulation:
   output_dir: results/
   use_zr_eff: false  # true = fixed (theta*, Z_R_eff) from table; false = dynamic Zr(theta, eta)
   sphere_collision: false  # true = sphere mode; bypasses all empirical sub-models
-  usf_ftr_correction: false  # mean-field shear correction to f_tr in USF (no LAMMPS calibration)
 
 preprocessing:
   ctc_data_dir: CTC_data/
