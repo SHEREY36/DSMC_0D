@@ -179,13 +179,45 @@ def sample_dissp(a, b, rng=np.random):
     return rng.beta(a, b)
 
 
+def eps_from_eij(vrel_vec, eij, rng=np.random):
+    """Map an accepted lab-frame eij direction to Bird-frame azimuth eps.
+
+    The scattering kernel in update_velocities rotates the pre-collision
+    relative velocity by polar angle chi and azimuth eps about ghat using a
+    frame implicit in Bird's formula. This helper projects the accepted eij
+    into that same frame so the acceptance geometry controls the azimuth.
+    """
+    vr = np.linalg.norm(vrel_vec)
+    if vr <= 1.0e-14:
+        return 2.0 * np.pi * rng.random()
+
+    ghat = vrel_vec / vr
+    eij_perp = eij - np.dot(eij, ghat) * ghat
+    eij_perp_norm = np.linalg.norm(eij_perp)
+    if eij_perp_norm <= 1.0e-10:
+        return 2.0 * np.pi * rng.random()
+
+    ur, vr_comp, wr_comp = ghat
+    vrwr = np.sqrt(vr_comp**2 + wr_comp**2)
+    if vrwr <= 1.0e-8:
+        return 2.0 * np.pi * rng.random()
+
+    e1_ref = np.array([0.0, wr_comp / vrwr, -vr_comp / vrwr])
+    e2_ref = np.cross(ghat, e1_ref)
+    eij_perp_hat = eij_perp / eij_perp_norm
+
+    cos_eps = np.dot(eij_perp_hat, e1_ref)
+    sin_eps = np.dot(eij_perp_hat, e2_ref)
+    return np.arctan2(sin_eps, cos_eps)
+
+
 def update_velocities(velA, velB, chi, eps, crmag):
     """Compute post-collision velocities given scattering angles.
 
     Parameters:
         velA, velB: (3,) velocity vectors of the two particles
         chi: scattering angle (radians)
-        eps: azimuthal angle (radians)
+        eps: azimuthal angle (radians) in the Bird frame about the incoming ghat
         crmag: magnitude of post-collision relative velocity
 
     Returns (velA_new, velB_new) as (1,3) arrays.

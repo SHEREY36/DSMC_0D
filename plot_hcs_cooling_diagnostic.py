@@ -22,7 +22,13 @@ from scipy.stats import kstest
 
 sys.path.insert(0, ".")
 
-from src.simulation.collision import CollisionModels, init_p_chi_distribution, sample_chi, update_velocities
+from src.simulation.collision import (
+    CollisionModels,
+    eps_from_eij,
+    init_p_chi_distribution,
+    sample_chi,
+    update_velocities,
+)
 
 # ---------------------------------------------------------------------------
 # Load scattering model — same path as dsmc.py uses
@@ -41,7 +47,8 @@ N = 200_000
 np.random.seed(42)
 
 # ---------------------------------------------------------------------------
-# Run: sample chi from the MODEL p(chi|AR=1,alpha=1), apply update_velocities
+# Run: sample chi from the MODEL p(chi|AR=1,alpha=1), derive eps from the
+# accepted eij geometry, and apply update_velocities.
 # ---------------------------------------------------------------------------
 print(f"Running AR=1, alpha=1.0 kernel test ({N:,} collisions)...")
 
@@ -55,8 +62,12 @@ for i in range(N):
     g_pre_mag = np.linalg.norm(g_pre)
 
     chi_s = sample_chi(p_chi_fn_eq, p_max_eq)          # chi in [0, 1]
-    RR    = np.random.random()
-    eps   = 2 * np.pi * RR                              # same as dsmc.py line 388-389
+    eij = np.random.randn(3)
+    eij /= np.linalg.norm(eij)
+    CR = np.dot(eij, g_pre)
+    if CR < 0.0:
+        eij = -eij
+    eps = eps_from_eij(g_pre, eij)
 
     chi_samp[i] = chi_s
 

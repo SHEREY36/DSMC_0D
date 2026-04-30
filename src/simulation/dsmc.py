@@ -4,7 +4,7 @@ import numpy as np
 
 from .particle import compute_particle_params
 from .collision import (
-    CollisionModels, init_p_chi_distribution, sample_chi,
+    CollisionModels, eps_from_eij, init_p_chi_distribution, sample_chi,
     sample_dissp, update_velocities
 )
 from .pressure import compute_pij_k, accumulate_pij_c, normalise_pij_c
@@ -391,8 +391,9 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     cr_new = np.sqrt(Etrans_f * params.omass)
                     cr_new = max(cr_new, 1e-14)
 
-                    RR = np.random.random()
-                    eps = 2 * np.pi * RR
+                    # Use the accepted collision geometry to set the azimuth in
+                    # the same Bird frame expected by update_velocities().
+                    eps = eps_from_eij(vrel_vec, eij)
                     vel[p1, :], vel[p2, :] = update_velocities(
                         vel[p1, :], vel[p2, :], chi_rad, eps, cr_new
                     )
