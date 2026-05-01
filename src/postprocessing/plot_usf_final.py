@@ -1444,12 +1444,20 @@ def plot_stress_vs_astar(dsmc_spheres: list[dict],
     cmap = plt.get_cmap("plasma")
 
     # --- build DSMC scatter (colour by alpha) ---
-    dsp_a     = np.array([c["alpha"]   for c in dsmc_spheres])
-    dsp_astar = np.array([c["a_star"]  for c in dsmc_spheres])
-    dsp_pxx   = np.array([c["Pxx_mean"] for c in dsmc_spheres])
-    dsp_pxy   = np.array([c["Pxy_mean"] for c in dsmc_spheres])
-    dsp_pxx_s = np.array([c["Pxx_std"]  for c in dsmc_spheres])
-    dsp_pxy_s = np.array([c["Pxy_std"]  for c in dsmc_spheres])
+    dsmc_astar_cases = [
+        c for c in dsmc_spheres
+        if np.isfinite(c.get("a_star", float("nan")))
+    ]
+    if dsmc_spheres and not dsmc_astar_cases:
+        print("  DSMC sphere cases do not contain finite a_star; "
+              "stress_vs_astar will show LAMMPS/KT only.")
+
+    dsp_a     = np.array([c["alpha"]    for c in dsmc_astar_cases])
+    dsp_astar = np.array([c["a_star"]   for c in dsmc_astar_cases])
+    dsp_pxx   = np.array([c["Pxx_mean"] for c in dsmc_astar_cases])
+    dsp_pxy   = np.array([c["Pxy_mean"] for c in dsmc_astar_cases])
+    dsp_pxx_s = np.array([c["Pxx_std"]  for c in dsmc_astar_cases])
+    dsp_pxy_s = np.array([c["Pxy_std"]  for c in dsmc_astar_cases])
 
     # --- build LAMMPS scatter ---
     lsp_astar = np.array([r.get("a_star", float("nan")) for r in lmp_spheres])
@@ -1464,12 +1472,15 @@ def plot_stress_vs_astar(dsmc_spheres: list[dict],
     ]):
         ax = axes[panel]
 
-        # DSMC points (colour by alpha)
-        sc = ax.scatter(dsp_astar, dsp_y, c=dsp_a, cmap="plasma",
-                        vmin=amin, vmax=amax, marker="o", s=ms**2,
-                        edgecolors="none", zorder=4, label="DSMC spheres")
-        ax.errorbar(dsp_astar, dsp_y, yerr=dsp_ys,
-                    fmt="none", ecolor=C_DSMC, elinewidth=0.8, alpha=0.6, zorder=3)
+        # DSMC points (colour by alpha), if the sphere source has a_star.
+        sc = None
+        if len(dsp_astar) > 0:
+            sc = ax.scatter(dsp_astar, dsp_y, c=dsp_a, cmap="plasma",
+                            vmin=amin, vmax=amax, marker="o", s=ms**2,
+                            edgecolors="none", zorder=4, label="DSMC spheres")
+            ax.errorbar(dsp_astar, dsp_y, yerr=dsp_ys,
+                        fmt="none", ecolor=C_DSMC, elinewidth=0.8,
+                        alpha=0.6, zorder=3)
 
         # LAMMPS points
         valid = np.isfinite(lsp_astar)
@@ -1490,8 +1501,9 @@ def plot_stress_vs_astar(dsmc_spheres: list[dict],
 
         if panel == 0:
             handles, labels = [], []
-            handles.append(plt.Line2D([], [], marker="o", color=C_DSMC,
-                                      linestyle="none", label="DSMC spheres"))
+            if len(dsp_astar) > 0:
+                handles.append(plt.Line2D([], [], marker="o", color=C_DSMC,
+                                          linestyle="none", label="DSMC spheres"))
             if valid.any():
                 handles.append(plt.Line2D([], [], marker="^", color=C_LSP,
                                           linestyle="none", label="LAMMPS spheres"))
@@ -1499,9 +1511,10 @@ def plot_stress_vs_astar(dsmc_spheres: list[dict],
                                       label="KT (GD, a*_KT_ss)"))
             ax.legend(handles=handles, fontsize=9, loc="best")
 
-    cbar = fig.colorbar(sc, ax=axes.ravel().tolist(),
-                        orientation="vertical", fraction=0.025, pad=0.04)
-    cbar.set_label(r"$\alpha$", fontsize=10)
+    if len(dsp_astar) > 0:
+        cbar = fig.colorbar(sc, ax=axes.ravel().tolist(),
+                            orientation="vertical", fraction=0.025, pad=0.04)
+        cbar.set_label(r"$\alpha$", fontsize=10)
 
     fig.suptitle(
         r"Reduced stress vs $a^*$ — sphere USF  "
@@ -1523,7 +1536,7 @@ def main():
     parser.add_argument("--sweep-dir",      default="runs/AR2_usf_sweep")
     parser.add_argument("--lammps-sphcyl",  default="LAMMPS_data/USF/sphcyl_USF_AR2")
     parser.add_argument("--lammps-spheres", default="LAMMPS_data/USF/spheres/dilute3a")
-    parser.add_argument("--dsmc-spheres",   default="runs/Run_shear_NN",
+    parser.add_argument("--dsmc-spheres",   default="runs/AR1_usf_sweep",
                         help="Path to sphere DSMC sweep: either 0D format (alpha_NNN "
                              "subdirs) or NSP Fortran format (integer subdirs). "
                              "Pass empty string to skip.")

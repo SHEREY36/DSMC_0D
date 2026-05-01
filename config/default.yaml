@@ -30,6 +30,20 @@ simulation:
   use_zr_eff: false  # true = fixed (theta*, Z_R_eff) from table; false = dynamic Zr(theta, eta)
   sphere_collision: false  # true = sphere mode; bypasses all empirical sub-models
 
+diagnostics:
+  non_gaussian:
+    enabled: false  # passive HCS VDF/moment diagnostics for paper statistics
+    start_tau: 20.0
+    sample_every_outputs: 1
+    hist_tr_bins: 240
+    hist_tr_range: [-5.0, 5.0]
+    hist_rot_bins: 240
+    hist_rot_range: [-5.0, 5.0]
+    hist_speed_bins: 200
+    hist_speed_range: [0.0, 7.0]
+    write_time_series: true
+    write_histograms: true
+
 preprocessing:
   ctc_data_dir: CTC_data/
   gmm:
@@ -51,6 +65,14 @@ preprocessing:
   dissipation:
     beta_a: 1.21
     beta_b: 3.67
+  mu_chi:
+    source_root: ../Coll_Models/results   # path to alpha_*_r1.00_AR*/chi.txt data
+    output_file: models/mu_chi_beta_coeffs.npz
+    n_mu_bins: 20                         # equal-count mu bins per (alpha, AR) case
+    polynomial_M: 2                       # degree in AR
+    polynomial_N: 2                       # degree in phi(alpha) = 1 - alpha^beta_exp
+    polynomial_J: 3                       # degree in mu
+    beta_exp: 0.5                         # exponent in phi(alpha)
   ftr:
     results_root: results2/results
     alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]

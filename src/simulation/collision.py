@@ -9,12 +9,14 @@ from src.preprocessing.dissipation import (
 )
 from src.preprocessing.ftr_distribution import load_ftr_table, lookup_ftr_params
 from src.preprocessing.zr_eff_table import load_zr_eff_table, lookup_zr_eff
+from src.preprocessing.mu_chi_model import load_mu_chi_model, sample_chi_given_mu
 
 
 class CollisionModels:
     """Container for all pre-computed collision model artifacts."""
 
-    def __init__(self, model_dir, gmm_npz_path=None, ftr_params_path=None):
+    def __init__(self, model_dir, gmm_npz_path=None, ftr_params_path=None,
+                 zr_eff_path=None, c_alpha_path=None):
         """Load all model artifacts.
 
         Parameters:
@@ -25,11 +27,13 @@ class CollisionModels:
             ftr_params_path: path to ftr_params_*.json for Laplace f_tr sampling.
                              If None, auto-detects ftr_params_*.json in model_dir.
                              If no file is found, f_tr sampling is disabled (f_tr=0).
+            zr_eff_path: optional explicit Z_R_eff table path.
+            c_alpha_path: optional explicit C_alpha calibration table path.
         """
         self.model_dir = model_dir
-        self._load_all(gmm_npz_path, ftr_params_path)
+        self._load_all(gmm_npz_path, ftr_params_path, zr_eff_path, c_alpha_path)
 
-    def _load_all(self, gmm_npz_path, ftr_params_path):
+    def _load_all(self, gmm_npz_path, ftr_params_path, zr_eff_path, c_alpha_path):
         """Load all serialized model artifacts from disk."""
         # Conditional GMM (from pre-computed .npz)
         if gmm_npz_path is None:
@@ -81,8 +85,9 @@ class CollisionModels:
                 print(f"  Warning: f_tr table not found at {ftr_params_path}, "
                       f"f_tr sampling disabled (f_tr=0).")
 
-        # Z_R_eff table (auto-detect; graceful fallback if absent)
-        zr_eff_path = os.path.join(self.model_dir, "zr_eff_table_AR20.json")
+        # Z_R_eff table (optional; graceful fallback if absent)
+        if zr_eff_path is None:
+            zr_eff_path = os.path.join(self.model_dir, "zr_eff_table_AR20.json")
         if os.path.exists(zr_eff_path):
             self.zr_eff_table = load_zr_eff_table(zr_eff_path)
             print(f"  Loaded Z_R_eff table: {zr_eff_path}")
@@ -90,12 +95,21 @@ class CollisionModels:
             self.zr_eff_table = None
 
         # C_alpha calibration table (optional)
-        c_alpha_path = os.path.join(self.model_dir, "C_alpha_table_AR20.json")
+        if c_alpha_path is None:
+            c_alpha_path = os.path.join(self.model_dir, "C_alpha_table_AR20.json")
         if os.path.exists(c_alpha_path):
             self.C_alpha_table = load_table(c_alpha_path)
             print(f"  Loaded C_alpha table: {c_alpha_path}")
         else:
             self.C_alpha_table = None
+
+        # Conditional chi Beta model (optional — falls back to marginal rejection sampler)
+        mu_chi_path = os.path.join(self.model_dir, "mu_chi_beta_coeffs.npz")
+        if os.path.exists(mu_chi_path):
+            self.mu_chi_model = load_mu_chi_model(mu_chi_path)
+            print(f"  Loaded mu-chi Beta model: {mu_chi_path}")
+        else:
+            self.mu_chi_model = None
 
     def get_gamma_max(self, alpha, AR):
         """Look up gamma_max for (alpha, AR). Raises KeyError if not found."""
@@ -122,6 +136,25 @@ class CollisionModels:
         if self.zr_eff_table is None:
             return None
         return lookup_zr_eff(self.zr_eff_table, alpha, AR)
+
+    def sample_chi_conditional(self, mu, alpha, AR, rng=np.random):
+        """Sample chi (radians) from p(chi | mu, alpha, AR).
+
+        Uses the conditional Beta model when available; raises RuntimeError
+        if the model has not been loaded (caller should check has_mu_chi_model).
+        """
+        if self.mu_chi_model is None:
+            raise RuntimeError(
+                "mu-chi Beta model not loaded. Run run_mu_chi_fit.py first "
+                "or check that models/mu_chi_beta_coeffs.npz exists."
+            )
+        c_a, c_b, M, N, J, beta_exp = self.mu_chi_model
+        return sample_chi_given_mu(mu, alpha, AR, c_a, c_b, M, N, J,
+                                   beta_exp=beta_exp, rng=rng)
+
+    @property
+    def has_mu_chi_model(self):
+        return self.mu_chi_model is not None
 
     def get_C_alpha(self, alpha, AR):
         """Look up calibration constant C(alpha, AR).

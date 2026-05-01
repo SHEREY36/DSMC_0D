@@ -28,8 +28,15 @@ def main():
         model_dir = config['preprocessing']['model_output_dir']
         gmm_npz = config['preprocessing']['gmm'].get('gmm_cond_file')
         ftr_path = config['preprocessing'].get('ftr', {}).get('ftr_params_file')
+        zr_eff_path = config.get('preprocessing', {}).get('zr_eff', {}).get(
+            'zr_eff_table_file'
+        )
+        c_alpha_path = config.get('calibration', {}).get('C_alpha_table_file')
         print(f"Loading models from {model_dir}...")
-        models = CollisionModels(model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path)
+        models = CollisionModels(
+            model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path,
+            zr_eff_path=zr_eff_path, c_alpha_path=c_alpha_path
+        )
 
     run_all_realizations(config, models)
     print("All realizations complete.")

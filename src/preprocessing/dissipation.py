@@ -63,7 +63,7 @@ def lookup_gamma_max(table, alpha, AR):
     key = f"({alpha}, {AR})"
     if key in table:
         return table[key]
-    return _interpolate_alpha_for_AR(table, alpha, AR, "gamma_max")
+    return _interpolate_alpha_then_AR(table, alpha, AR, "gamma_max")
 
 
 def lookup_one_hit(table, alpha, AR):
@@ -74,7 +74,7 @@ def lookup_one_hit(table, alpha, AR):
     key = f"({alpha}, {AR})"
     if key in table:
         return table[key]
-    return _interpolate_alpha_for_AR(table, alpha, AR, "one_hit probability")
+    return _interpolate_alpha_then_AR(table, alpha, AR, "one_hit probability")
 
 
 def save_table(table, filepath):
@@ -132,6 +132,41 @@ def _interpolate_alpha_for_AR(table, alpha, AR, quantity_name):
         return float(values[-1] + slope * (alpha - alphas[-1]))
 
     return float(np.interp(alpha, alphas, values))
+
+
+def _interpolate_alpha_then_AR(table, alpha, AR, quantity_name):
+    """Interpolate first in alpha at fixed AR, then across AR if needed."""
+    alpha = float(alpha)
+    AR = float(AR)
+    available_ars = sorted({_parse_table_key(k)[1] for k in table.keys()})
+    if not available_ars:
+        raise KeyError(f"{quantity_name} table is empty")
+
+    for ar_i in available_ars:
+        if np.isclose(ar_i, AR, atol=1e-12):
+            return _interpolate_alpha_for_AR(table, alpha, ar_i, quantity_name)
+
+    values_by_ar = np.array([
+        _interpolate_alpha_for_AR(table, alpha, ar_i, quantity_name)
+        for ar_i in available_ars
+    ], dtype=float)
+    ar_values = np.array(available_ars, dtype=float)
+
+    if AR <= ar_values[0]:
+        if len(ar_values) == 1:
+            return float(values_by_ar[0])
+        slope = ((values_by_ar[1] - values_by_ar[0])
+                 / (ar_values[1] - ar_values[0]))
+        return float(values_by_ar[0] + slope * (AR - ar_values[0]))
+
+    if AR >= ar_values[-1]:
+        if len(ar_values) == 1:
+            return float(values_by_ar[-1])
+        slope = ((values_by_ar[-1] - values_by_ar[-2])
+                 / (ar_values[-1] - ar_values[-2]))
+        return float(values_by_ar[-1] + slope * (AR - ar_values[-1]))
+
+    return float(np.interp(AR, ar_values, values_by_ar))
 
 
 def sample_dissp(a, b):
