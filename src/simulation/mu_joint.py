@@ -178,6 +178,35 @@ def perpendicular_unit(ghat, rng=np.random):
     return out / norm
 
 
+def mu_plane_post_relative_with_eps(vrel_vec, eij, chi_rad, gpost_mag, eps,
+                                    rng=np.random):
+    """Scatter g' at polar angle chi_rad from ghat, azimuthal angle eps around ghat.
+
+    eps = 0              → in-plane, toward -n_perp (same as hard-sphere limit)
+    eps ~ Uniform(0,2pi) → isotropic scatter on the chi-cone
+    n_perp_hat is the component of eij perpendicular to ghat (in-plane reference).
+    n2 = ghat × n_perp_hat is the out-of-plane basis.
+    """
+    gmag = np.linalg.norm(vrel_vec)
+    if gmag <= 1.0e-14:
+        return np.zeros(3)
+    ghat = vrel_vec / gmag
+    mu = float(np.clip(np.dot(eij, ghat), 0.0, 1.0))
+    n_perp = eij - mu * ghat
+    n_perp_norm = np.linalg.norm(n_perp)
+    if n_perp_norm <= 1.0e-12:
+        n_perp_hat = perpendicular_unit(ghat, rng=rng)
+    else:
+        n_perp_hat = n_perp / n_perp_norm
+    n2 = np.cross(ghat, n_perp_hat)
+    ghat_post = (np.cos(chi_rad) * ghat
+                 - np.sin(chi_rad) * (np.cos(eps) * n_perp_hat
+                                      - np.sin(eps) * n2))
+    norm = np.linalg.norm(ghat_post)
+    ghat_post = ghat_post / norm if norm > 1.0e-14 else ghat
+    return gpost_mag * ghat_post
+
+
 def mu_plane_post_relative(vrel_vec, eij, chi_rad, gpost_mag, rng=np.random):
     """Return g' in the accepted-normal plane with sphere-compatible sign."""
     gmag = np.linalg.norm(vrel_vec)

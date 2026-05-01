@@ -6,7 +6,7 @@ from .particle import compute_particle_params
 from .collision import CollisionModels, sample_dissp
 from .pressure import compute_pij_k, accumulate_pij_c, normalise_pij_c
 from .non_gaussian import NonGaussianDiagnostics
-from .mu_joint import mu_plane_post_relative
+from .mu_joint import mu_plane_post_relative, mu_plane_post_relative_with_eps
 from src.preprocessing.relaxation import prepare_theta, Zr
 
 
@@ -49,6 +49,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     np.random.seed(seed)
 
     sphere_mode = config.get('simulation', {}).get('sphere_collision', False)
+    use_isotropic_eps = config.get('simulation', {}).get('use_isotropic_eps', False)
 
     # Particle properties
     params = compute_particle_params(config)
@@ -143,6 +144,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     else:
         print(f"  Np={Np}, eta={eta:.4f} (Zr), C_alpha={C_alpha:.4f}, "
               f"mu_chi_model={models.has_mu_chi_model}, "
+              f"isotropic_eps={use_isotropic_eps}, "
               f"gamma_max={gamma_max:.6f}, prob_one_hit={prob_one_hit:.6f}, "
               f"equilibration_time={equilibration_time:.3f}, {flow_str}")
 
@@ -354,11 +356,21 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                         cr_new = np.sqrt(Etrans_f * params.omass)
                         cr_new = max(cr_new, 1e-14)
 
-                        # Scatter g' in the (g, eij) plane.
-                        # mu_plane_post_relative keeps g' in span(ghat, n_perp_hat),
-                        # which is the correct physics for an impulsive contact along eij.
+                        # Scatter g' using azimuthal angle eps around ghat.
+                        # eps=0 → in-plane with eij (hard-sphere limit).
+                        # use_isotropic_eps → eps ~ Uniform(0,2pi) (orientation-
+                        #   averaged result for smooth spherocylinders).
+                        # has_eps_model → eps ~ vonMises(0, kappa(mu,alpha,AR)).
                         gpost_mag = 2.0 * cr_new
-                        gpost = mu_plane_post_relative(vrel_vec, eij, chi_rad, gpost_mag)
+                        if use_isotropic_eps:
+                            eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
+                        elif models.has_eps_model:
+                            eps_rad = models.sample_eps(mu_abs, _alpha_scat, params.AR)
+                        else:
+                            eps_rad = 0.0
+                        gpost = mu_plane_post_relative_with_eps(
+                            vrel_vec, eij, chi_rad, gpost_mag, eps_rad
+                        )
                         vel[p1, :] = vcom + 0.5 * gpost
                         vel[p2, :] = vcom - 0.5 * gpost
                         accumulate_pij_c(

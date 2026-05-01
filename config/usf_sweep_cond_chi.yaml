@@ -28,6 +28,7 @@ simulation:
   output_dir: runs/AR2_usf_cond_chi/results/
   use_zr_eff: false
   sphere_collision: false
+  use_isotropic_eps: false   # set true to test isotropic azimuthal scatter
 
 preprocessing:
   ctc_data_dir: CTC_data/

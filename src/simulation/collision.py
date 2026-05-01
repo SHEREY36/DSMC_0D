@@ -10,6 +10,7 @@ from src.preprocessing.dissipation import (
 from src.preprocessing.ftr_distribution import load_ftr_table, lookup_ftr_params
 from src.preprocessing.zr_eff_table import load_zr_eff_table, lookup_zr_eff
 from src.preprocessing.mu_chi_model import load_mu_chi_model, sample_chi_given_mu
+from src.preprocessing.fit_eps_model import load_eps_model, sample_eps_given_mu
 
 
 class CollisionModels:
@@ -111,6 +112,15 @@ class CollisionModels:
         else:
             self.mu_chi_model = None
 
+        # Azimuthal eps von Mises model (optional — falls back to eps=0 in-plane)
+        eps_path = os.path.join(self.model_dir, "eps_azimuth_coeffs.npz")
+        result = load_eps_model(eps_path)
+        if result is not None:
+            self.eps_model = result
+            print(f"  Loaded eps azimuth model: {eps_path}")
+        else:
+            self.eps_model = None
+
     def get_gamma_max(self, alpha, AR):
         """Look up gamma_max for (alpha, AR). Raises KeyError if not found."""
         return lookup_gamma_max(self.gamma_max_table, alpha, AR)
@@ -155,6 +165,23 @@ class CollisionModels:
     @property
     def has_mu_chi_model(self):
         return self.mu_chi_model is not None
+
+    def sample_eps(self, mu, alpha, AR, rng=np.random):
+        """Sample azimuthal angle eps ~ vonMises(0, kappa(mu, alpha, AR)).
+
+        Returns eps in (-pi, pi].  Requires eps_model to be loaded.
+        """
+        if self.eps_model is None:
+            raise RuntimeError(
+                "eps azimuth model not loaded. Run run_eps_fit.py first "
+                "or check that models/eps_azimuth_coeffs.npz exists."
+            )
+        c_kappa, M, N, J, beta_exp = self.eps_model
+        return sample_eps_given_mu(mu, alpha, AR, c_kappa, M, N, J, beta_exp, rng=rng)
+
+    @property
+    def has_eps_model(self):
+        return self.eps_model is not None
 
     def get_C_alpha(self, alpha, AR):
         """Look up calibration constant C(alpha, AR).
