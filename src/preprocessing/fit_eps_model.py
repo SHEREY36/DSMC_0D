@@ -10,14 +10,14 @@ result; eps uniform (kappa=0) means azimuthally isotropic scattering.
 kappa(mu, alpha, AR) is fitted as a polynomial in (AR, phi(alpha), mu) in
 log-space (log(1+kappa), to allow kappa=0), matching the chi-model framework.
 
-Data source: 10-column chi.txt (new format with ghat_pre and ghat_post):
+Data source: 10-column chi.txt (new format with eij and ghat_post):
   col 0 (index 0): b_impact
   col 1 (index 1): chi (scattering angle, radians)
   col 2 (index 2): psi
   col 3 (index 3): mu_in = |r12_fc_hat · ghat_pre|
-  col 4 (index 4): ghat_pre_x
-  col 5 (index 5): ghat_pre_y
-  col 6 (index 6): ghat_pre_z
+  col 4 (index 4): eij_x  (contact normal, first-contact only)
+  col 5 (index 5): eij_y
+  col 6 (index 6): eij_z
   col 7 (index 7): ghat_post_x
   col 8 (index 8): ghat_post_y
   col 9 (index 9): ghat_post_z
@@ -84,44 +84,46 @@ def _von_mises_kappa_from_R(R_bar):
         return 1.0 / max(denom, 1.0e-10)
 
 
-def _compute_eps_angles(mu_vals, ghat_pre, ghat_post, chi_rad):
-    """Compute azimuthal eps for each record.
+def _compute_eps_angles(eij, ghat_post):
+    """Compute eij-relative azimuthal eps for each record.
 
-    eps is the azimuthal angle of ghat_post around ghat_pre, measured in the
-    plane perpendicular to ghat_pre.  A stable reference frame is built per
-    record.
+    eps is the azimuthal angle of ghat_post around ghat_pre (= CTC convention
+    (-1,0,0)), measured relative to the (ghat_pre, eij) plane.  eps=0 is the
+    in-plane direction (same as the hard-sphere / mu_plane_post_relative limit).
+
+    The frame matches mu_plane_post_relative_with_eps in mu_joint.py:
+      n_perp_hat = (eij - mu*ghat_pre) / |...|   [e1, eps=0 reference]
+      n2         = ghat_pre x n_perp_hat           [e2, out-of-plane]
 
     Returns eps array in (-pi, pi].
     """
-    N = ghat_pre.shape[0]
+    ghat_pre_vec = np.array([-1.0, 0.0, 0.0])   # CTC standardises VREL0
+    N = eij.shape[0]
     eps_out = np.zeros(N)
 
     for i in range(N):
-        gp = ghat_pre[i]
-        gq = ghat_post[i]
+        eij_i = eij[i] / np.linalg.norm(eij[i])
+        gq    = ghat_post[i]
 
-        # Component of ghat_post perpendicular to ghat_pre
-        gq_perp = gq - np.dot(gq, gp) * gp
+        # n_perp_hat: component of eij perpendicular to ghat_pre
+        mu_i   = float(np.clip(np.dot(eij_i, ghat_pre_vec), -1.0, 1.0))
+        n_perp = eij_i - mu_i * ghat_pre_vec
+        n_perp_norm = np.linalg.norm(n_perp)
+        if n_perp_norm < 1.0e-10:
+            eps_out[i] = 0.0
+            continue
+        n_perp_hat = n_perp / n_perp_norm          # e1 — eps=0 direction
+        n2 = np.cross(ghat_pre_vec, n_perp_hat)    # e2 — out-of-plane
+
+        # Project ghat_post onto the (n_perp_hat, n2) plane
+        gq_perp = gq - np.dot(gq, ghat_pre_vec) * ghat_pre_vec
         norm_perp = np.linalg.norm(gq_perp)
         if norm_perp < 1.0e-10:
             eps_out[i] = 0.0
             continue
-
-        # Build stable orthonormal frame (e1, e2) in the ghat_pre-perpendicular plane
-        ref = np.array([1.0, 0.0, 0.0])
-        if abs(np.dot(gp, ref)) > 0.9:
-            ref = np.array([0.0, 1.0, 0.0])
-        e1 = ref - np.dot(ref, gp) * gp
-        e1_norm = np.linalg.norm(e1)
-        if e1_norm < 1.0e-14:
-            e1 = np.array([0.0, 0.0, 1.0])
-            e1 = e1 - np.dot(e1, gp) * gp
-            e1_norm = np.linalg.norm(e1)
-        e1 /= e1_norm
-        e2 = np.cross(gp, e1)
-
         gq_perp_hat = gq_perp / norm_perp
-        eps_out[i] = np.arctan2(np.dot(gq_perp_hat, e2), np.dot(gq_perp_hat, e1))
+        eps_out[i] = np.arctan2(np.dot(gq_perp_hat, n2),
+                                np.dot(gq_perp_hat, n_perp_hat))
 
     return eps_out
 
@@ -129,8 +131,9 @@ def _compute_eps_angles(mu_vals, ghat_pre, ghat_post, chi_rad):
 def _load_case_eps(chi_path, min_chi_rad=0.05):
     """Load a 10-column chi.txt and return (mu, eps_rad) arrays.
 
-    Skips records where chi < min_chi_rad (near-forward scatter is degenerate
-    for azimuthal computation).
+    Columns 4–6 must be eij (contact normal), columns 7–9 must be ghat_post.
+    Skips records where chi < min_chi_rad (near-forward scatter: eij nearly
+    parallel to ghat_pre, so the in-plane frame is degenerate).
     """
     try:
         data = np.loadtxt(chi_path)
@@ -141,15 +144,14 @@ def _load_case_eps(chi_path, min_chi_rad=0.05):
     if data.shape[1] < 10:
         return None, None   # old 4-column format
 
-    mu = data[:, 3]
-    ghat_pre  = data[:, 4:7]
+    mu        = data[:, 3]
+    eij       = data[:, 4:7]
     ghat_post = data[:, 7:10]
     chi_vals  = data[:, 1]
 
-    # Normalise (guard against numerical drift)
-    pre_norms  = np.linalg.norm(ghat_pre,  axis=1, keepdims=True)
+    eij_norms  = np.linalg.norm(eij,       axis=1, keepdims=True)
     post_norms = np.linalg.norm(ghat_post, axis=1, keepdims=True)
-    valid = ((pre_norms  > 0.5).ravel()
+    valid = ((eij_norms  > 0.5).ravel()
              & (post_norms > 0.5).ravel()
              & (chi_vals   > min_chi_rad)
              & np.isfinite(mu)
@@ -157,12 +159,11 @@ def _load_case_eps(chi_path, min_chi_rad=0.05):
     if valid.sum() < 10:
         return None, None
 
-    ghat_pre  = ghat_pre[valid]  / pre_norms[valid]
+    eij       = eij[valid]       / eij_norms[valid]
     ghat_post = ghat_post[valid] / post_norms[valid]
     mu        = mu[valid]
-    chi_vals  = chi_vals[valid]
 
-    eps = _compute_eps_angles(mu, ghat_pre, ghat_post, chi_vals)
+    eps = _compute_eps_angles(eij, ghat_post)
     return mu, eps
 
 
