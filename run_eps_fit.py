@@ -38,15 +38,17 @@ def main():
     N = int(eps_cfg.get("polynomial_N", mc.get("polynomial_N", 2)))
     J = int(eps_cfg.get("polynomial_J", mc.get("polynomial_J", 3)))
     beta_exp = float(eps_cfg.get("beta_exp", mc.get("beta_exp", 0.5)))
+    max_kappa = float(eps_cfg.get("max_kappa", 20.0))
 
     print(f"Fitting eps azimuth model from: {source_root}")
-    print(f"  n_mu_bins={n_mu_bins}, M={M}, N={N}, J={J}, beta_exp={beta_exp}")
+    print(f"  n_mu_bins={n_mu_bins}, M={M}, N={N}, J={J}, beta_exp={beta_exp}, max_kappa={max_kappa}")
 
     c_kappa, M_fit, N_fit, J_fit, beta_exp_fit, diagnostics = fit_eps_model(
         source_root=source_root,
         n_mu_bins=n_mu_bins,
         M=M, N=N, J=J,
         beta_exp=beta_exp,
+        max_kappa=max_kappa,
     )
 
     print("\nPer-case isotropy diagnostics (R_bar ≈ 0 → isotropic):")

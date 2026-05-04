@@ -10,6 +10,19 @@ from .mu_joint import mu_plane_post_relative, mu_plane_post_relative_with_eps
 from src.preprocessing.relaxation import prepare_theta, Zr
 
 
+def _chi_hs(mu, alpha):
+    """Hard-sphere scattering angle chi_hs(mu, alpha).
+
+    Replaces the stochastic conditional-chi Beta model for the direction
+    update.  Validation (diagnose_eps_model.py, plot_eps_model_tensor.py)
+    shows chi_cond introduces wrong-sign relax_gxy artifacts; chi_hs gives
+    the correct directional behaviour when combined with the vonMises eps model.
+    """
+    denom = np.sqrt(max(1.0 - (1.0 - alpha * alpha) * mu * mu, 1.0e-30))
+    cos_chi = (1.0 - (1.0 + alpha) * mu * mu) / denom
+    return float(np.arccos(np.clip(cos_chi, -1.0, 1.0)))
+
+
 def initialize_particles(Np, kTt, kTr, mass, mI):
     """Initialize particle velocities and rotational energies.
 
@@ -273,14 +286,15 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
                         in_equilibration = t < equilibration_time
 
-                        # Scattering angle: conditional Beta chi(mu) model.
-                        # mu = |eij · ghat| from the NTC-accepted geometry.
-                        # During equilibration, use elastic alpha=1 so geometry
-                        # relaxes without dissipation.
+                        # Scattering angle: hard-sphere chi_hs(mu, alpha).
+                        # Validation showed the stochastic conditional-chi
+                        # Beta model introduces wrong-sign anisotropy artifacts;
+                        # chi_hs paired with the vonMises eps model gives the
+                        # correct directional distribution (see plot_eps_model_tensor.py).
                         ghat = vrel_vec / max(vr, 1.0e-30)
                         mu_abs = abs(float(np.dot(eij, ghat)))
                         _alpha_scat = 1.0 if in_equilibration else alpha
-                        chi_rad = models.sample_chi_conditional(mu_abs, _alpha_scat, params.AR)
+                        chi_rad = _chi_hs(mu_abs, _alpha_scat)
 
                         # Rotational relaxation
                         theta = temp_ratio

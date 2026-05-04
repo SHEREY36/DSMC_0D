@@ -85,47 +85,51 @@ def _von_mises_kappa_from_R(R_bar):
 
 
 def _compute_eps_angles(eij, ghat_post):
-    """Compute eij-relative azimuthal eps for each record.
+    """Compute eij-relative azimuthal eps for each record (vectorized).
 
     eps is the azimuthal angle of ghat_post around ghat_pre (= CTC convention
     (-1,0,0)), measured relative to the (ghat_pre, eij) plane.  eps=0 is the
     in-plane direction (same as the hard-sphere / mu_plane_post_relative limit).
 
-    The frame matches mu_plane_post_relative_with_eps in mu_joint.py:
-      n_perp_hat = (eij - mu*ghat_pre) / |...|   [e1, eps=0 reference]
-      n2         = ghat_pre x n_perp_hat           [e2, out-of-plane]
+    With ghat_pre = [-1,0,0] the geometry simplifies exactly:
+      n_perp = [0, eij_y, eij_z]   (x-component cancels)
+      n2     = [0, n_perp_z, -n_perp_y]   (cross product with [-1,0,0])
+      gq_perp = [0, gq_y, gq_z]    (x-component cancels)
 
     Returns eps array in (-pi, pi].
     """
-    ghat_pre_vec = np.array([-1.0, 0.0, 0.0])   # CTC standardises VREL0
     N = eij.shape[0]
-    eps_out = np.zeros(N)
 
-    for i in range(N):
-        eij_i = eij[i] / np.linalg.norm(eij[i])
-        gq    = ghat_post[i]
+    # Normalize eij (rows may already be unit; guard divide-by-zero)
+    eij_n = eij / np.maximum(np.linalg.norm(eij, axis=1, keepdims=True), 1e-30)
 
-        # n_perp_hat: component of eij perpendicular to ghat_pre
-        mu_i   = float(np.clip(np.dot(eij_i, ghat_pre_vec), -1.0, 1.0))
-        n_perp = eij_i - mu_i * ghat_pre_vec
-        n_perp_norm = np.linalg.norm(n_perp)
-        if n_perp_norm < 1.0e-10:
-            eps_out[i] = 0.0
-            continue
-        n_perp_hat = n_perp / n_perp_norm          # e1 — eps=0 direction
-        n2 = np.cross(ghat_pre_vec, n_perp_hat)    # e2 — out-of-plane
+    # n_perp = eij - dot(eij, [-1,0,0])*[-1,0,0] = [0, eij_y, eij_z]
+    n_perp = np.column_stack([np.zeros(N), eij_n[:, 1], eij_n[:, 2]])
+    n_perp_norm = np.linalg.norm(n_perp, axis=1)
+    valid_ep = n_perp_norm > 1.0e-10
+    n_perp_hat = np.where(
+        valid_ep[:, None],
+        n_perp / np.maximum(n_perp_norm[:, None], 1e-30),
+        np.array([[0.0, 1.0, 0.0]]),
+    )
 
-        # Project ghat_post onto the (n_perp_hat, n2) plane
-        gq_perp = gq - np.dot(gq, ghat_pre_vec) * ghat_pre_vec
-        norm_perp = np.linalg.norm(gq_perp)
-        if norm_perp < 1.0e-10:
-            eps_out[i] = 0.0
-            continue
-        gq_perp_hat = gq_perp / norm_perp
-        eps_out[i] = np.arctan2(np.dot(gq_perp_hat, n2),
-                                np.dot(gq_perp_hat, n_perp_hat))
+    # n2 = [-1,0,0] x n_perp_hat = [0, n_perp_hat_z, -n_perp_hat_y]
+    n2 = np.column_stack([np.zeros(N), n_perp_hat[:, 2], -n_perp_hat[:, 1]])
 
-    return eps_out
+    # gq_perp = ghat_post - dot(ghat_post, [-1,0,0])*[-1,0,0] = [0, gq_y, gq_z]
+    gq_perp = np.column_stack([np.zeros(N), ghat_post[:, 1], ghat_post[:, 2]])
+    gq_perp_norm = np.linalg.norm(gq_perp, axis=1)
+    valid_gq = gq_perp_norm > 1.0e-10
+    gq_perp_hat = np.where(
+        valid_gq[:, None],
+        gq_perp / np.maximum(gq_perp_norm[:, None], 1e-30),
+        np.array([[0.0, 1.0, 0.0]]),
+    )
+
+    cos_eps = np.sum(gq_perp_hat * n_perp_hat, axis=1)
+    sin_eps = np.sum(gq_perp_hat * n2, axis=1)
+    eps = np.arctan2(sin_eps, cos_eps)
+    return np.where(valid_ep & valid_gq, eps, 0.0)
 
 
 def _load_case_eps(chi_path, min_chi_rad=0.05):
@@ -172,8 +176,15 @@ def _load_case_eps(chi_path, min_chi_rad=0.05):
 # ---------------------------------------------------------------------------
 
 def fit_eps_model(source_root, n_mu_bins=20, M=2, N=2, J=3,
-                  beta_exp=0.5, min_count=30):
+                  beta_exp=0.5, min_count=30, max_kappa=20.0):
     """Fit von Mises kappa(mu, alpha, AR) from 10-column CTC chi.txt files.
+
+    AR=1.0 (sphere) gives kappa→∞ and must be excluded from the polynomial
+    regression.  Any bin with kappa_emp > max_kappa is silently skipped so
+    near-sphere cases (AR=1.0, AR=1.1) do not dominate the fit.
+
+    For sampling: AR < 1.05 → kappa clamped to max_kappa in eval_kappa so
+    sample_eps_given_mu naturally returns eps≈0 (in-plane, hard-sphere limit).
 
     Returns (c_kappa, M, N, J, beta_exp, diagnostics) where c_kappa has shape
     (M+1, N+1, J+1) and diagnostics is a list of dicts.
@@ -235,6 +246,8 @@ def fit_eps_model(source_root, n_mu_bins=20, M=2, N=2, J=3,
             eps_bin = eps_arr[mask]
             R_bar   = float(np.abs(np.mean(np.exp(1j * eps_bin))))
             kappa   = _von_mises_kappa_from_R(R_bar)
+            if kappa > max_kappa:
+                continue   # skip near-sphere / extreme bins (would dominate regression)
             mu_mid  = float(np.mean(mu_arr[mask]))
 
             mu_pts.append(mu_mid)
@@ -280,8 +293,30 @@ def load_eps_model(path):
     )
 
 
+def eval_kappa_vec(mu_arr, alpha, AR, c_kappa, M, N, J, beta_exp):
+    """Vectorized eval_kappa for an array of mu values (same alpha, AR)."""
+    if float(AR) < 1.05:
+        return np.full(len(mu_arr), 1.0e6)
+    phi_val = _phi(alpha, beta_exp)
+    lkappa = np.zeros(len(mu_arr))
+    col = 0
+    for m in range(M + 1):
+        for n in range(N + 1):
+            for j in range(J + 1):
+                lkappa += (c_kappa.ravel()[col]
+                           * (float(AR) ** m) * (phi_val ** n) * (mu_arr ** j))
+                col += 1
+    return np.maximum(np.expm1(lkappa), 0.0)
+
+
 def eval_kappa(mu, alpha, AR, c_kappa, M, N, J, beta_exp):
-    """Evaluate von Mises kappa(mu, alpha, AR) from polynomial coefficients."""
+    """Evaluate von Mises kappa(mu, alpha, AR) from polynomial coefficients.
+
+    Returns a non-negative float.  For AR < 1.05 (sphere) a large sentinel
+    is returned so sample_eps_given_mu will produce eps≈0 (in-plane).
+    """
+    if float(AR) < 1.05:
+        return 1.0e6   # sphere: deterministic in-plane scattering
     phi_val = _phi(alpha, beta_exp)
     lkappa = 0.0
     col = 0
