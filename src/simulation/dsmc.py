@@ -76,6 +76,21 @@ def run_simulation(config, models, seed, output_path, pressure_path):
             "simulation.angular_transport_model must be 'current', "
             f"'stress_weight', or 'ctc_conditional', got {angular_transport_model!r}"
         )
+    angular_probability_override = sim_cfg.get(
+        'angular_transport_probability_override'
+    )
+    if angular_probability_override is not None:
+        angular_probability_override = float(angular_probability_override)
+        if not np.isfinite(angular_probability_override):
+            raise ValueError(
+                "simulation.angular_transport_probability_override must be finite, "
+                f"got {angular_probability_override!r}"
+            )
+        if angular_probability_override < 0.0 or angular_probability_override > 1.0:
+            raise ValueError(
+                "simulation.angular_transport_probability_override must be in "
+                f"[0, 1], got {angular_probability_override:.6g}"
+            )
 
     # Particle properties
     params = compute_particle_params(config)
@@ -126,15 +141,20 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
         C_alpha = config['system'].get('C_alpha') or models.get_C_alpha(alpha, params.AR)
         if angular_transport_model == 'stress_weight':
-            if models.stress_transport_table is None:
+            if angular_probability_override is not None:
+                w_eta = angular_probability_override
+                w_eta_elastic = angular_probability_override
+            elif models.stress_transport_table is None:
                 raise ValueError(
                     "simulation.angular_transport_model='stress_weight', but no "
                     "stress-transport table was loaded. Set "
                     "simulation.stress_transport_weight_file to the JSON produced "
-                    "by diagnose_stress_transport_weight.py."
+                    "by diagnose_stress_transport_weight.py, or set "
+                    "simulation.angular_transport_probability_override."
                 )
-            w_eta = models.get_stress_transport_weight(alpha, params.AR)
-            w_eta_elastic = models.get_stress_transport_weight(1.0, params.AR)
+            else:
+                w_eta = models.get_stress_transport_weight(alpha, params.AR)
+                w_eta_elastic = models.get_stress_transport_weight(1.0, params.AR)
         else:
             w_eta = 1.0
             w_eta_elastic = 1.0
