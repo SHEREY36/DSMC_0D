@@ -7,7 +7,7 @@
 #SBATCH --mem=4G
 #SBATCH --time=48:00:00
 #SBATCH -J hcs_ng_paper
-#SBATCH --array=0-2799%256
+#SBATCH --array=0-999%256
 #SBATCH -o logs/hcs_ng_%A_%a.out
 #SBATCH -e logs/hcs_ng_%A_%a.err
 
@@ -23,8 +23,12 @@
 # Total tasks: 7 * 8 * 50 = 2800
 # Concurrency: %256 uses up to 256 cores at once.
 #
-# Submit full campaign from project root:
-#   sbatch hpc/job_hcs_ng_paper_array.slurm
+# Submit full campaign from project root in three chunks.  Negishi rejects
+# array indices above the site array limit, so TASK_OFFSET maps each chunk back
+# onto the global 0..2799 campaign task id:
+#   TASK_OFFSET=0    sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=1000 sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=2000 sbatch --array=0-799%256 hpc/job_hcs_ng_paper_array.slurm
 #
 # Pilot examples:
 #   T_END_OVERRIDE=0.2 DOMAIN_OVERRIDE=20,20,20 START_TAU_OVERRIDE=0.0 \
@@ -73,17 +77,20 @@ read -r -a SEEDS <<< "$(python run_hcs_ng_realization.py --print-seeds)"
 
 N_ALPHA="${#ALPHAS[@]}"
 N_SEED="${#SEEDS[@]}"
-TASK_ID="${SLURM_ARRAY_TASK_ID}"
+TASK_OFFSET="${TASK_OFFSET:-0}"
+TASK_ID=$(( SLURM_ARRAY_TASK_ID + TASK_OFFSET ))
+TOTAL_TASKS=$(( ${#ARS[@]} * N_ALPHA * N_SEED ))
+
+if (( TASK_ID < 0 || TASK_ID >= TOTAL_TASKS )); then
+  echo "ERROR: global TASK_ID=${TASK_ID} is outside 0-$(( TOTAL_TASKS - 1 ))."
+  echo "       SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}, TASK_OFFSET=${TASK_OFFSET}"
+  exit 1
+fi
 
 AR_INDEX=$(( TASK_ID / (N_ALPHA * N_SEED) ))
 REM=$(( TASK_ID % (N_ALPHA * N_SEED) ))
 ALPHA_INDEX=$(( REM / N_SEED ))
 SEED_INDEX=$(( REM % N_SEED ))
-
-if (( AR_INDEX >= ${#ARS[@]} )); then
-  echo "ERROR: SLURM_ARRAY_TASK_ID=${TASK_ID} is outside the campaign grid."
-  exit 1
-fi
 
 AR="${ARS[$AR_INDEX]}"
 ALPHA="${ALPHAS[$ALPHA_INDEX]}"
@@ -91,6 +98,7 @@ SEED="${SEEDS[$SEED_INDEX]}"
 REALIZATION_INDEX=$(( SEED_INDEX + 1 ))
 
 echo "Task ${TASK_ID}: AR=${AR}, alpha=${ALPHA}, seed=${SEED}, R=${REALIZATION_INDEX}"
+echo "Array task ${SLURM_ARRAY_TASK_ID} with TASK_OFFSET=${TASK_OFFSET}"
 
 EXTRA_ARGS=()
 if [[ -n "${DOMAIN_OVERRIDE:-}" ]]; then
