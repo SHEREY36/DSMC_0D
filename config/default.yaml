@@ -27,27 +27,24 @@ simulation:
   #seeds: [42, 123, 999, 2024, 777]
   seeds: [42]
   output_dir: results/
-  use_zr_eff: false  # true = fixed (theta*, Z_R_eff) from table; false = dynamic Zr(theta, eta)
   sphere_collision: false  # true = sphere mode; bypasses all empirical sub-models
-  angular_transport_model: ctc_conditional  # 'current', 'stress_weight', or 'ctc_conditional'
-  use_stress_transport_weight: false  # legacy alias; ignored when angular_transport_model is set
+  angular_transport_model: current  # 'current' or 'stress_weight'
   # Experimental stress_weight override: probability of full angular scattering.
-  # If null, stress_weight uses stress_transport_weight_file.
   angular_transport_probability_override: null
-  stress_transport_weight_file: models/stress_transport_weights_ARge15.json
-  ctc_angular_file: models/ctc_angular_conditional_ARge15.npz
 
 diagnostics:
   non_gaussian:
     enabled: false  # passive HCS VDF/moment diagnostics for paper statistics
     start_tau: 20.0
     sample_every_outputs: 1
-    hist_tr_bins: 240
-    hist_tr_range: [-5.0, 5.0]
-    hist_rot_bins: 240
-    hist_rot_range: [-5.0, 5.0]
     hist_speed_bins: 200
     hist_speed_range: [0.0, 7.0]
+    hist_rot_speed_bins: 200
+    hist_rot_speed_range: [0.0, 7.0]
+    hist_energy_tr_bins: 200
+    hist_energy_tr_range: [0.0, 16.0]
+    hist_energy_rot_bins: 200
+    hist_energy_rot_range: [0.0, 16.0]
     write_time_series: true
     write_histograms: true
 

@@ -20,7 +20,7 @@ def load_non_gaussian_moments(path):
     data = np.atleast_2d(data)
     cols = [
         "t", "tau", "Ttrans", "Trot", "theta", "a2_tr", "a3_tr",
-        "a2_rot", "a11", "c4", "c6", "w4", "c2w2",
+        "a2_rot", "a11", "c2", "c4", "c6", "w2", "w4", "c2w2",
         "n_samples_particles",
     ]
     if data.shape[1] < len(cols):
@@ -60,7 +60,7 @@ def aggregate_non_gaussian_summaries(results_dir):
         return float(np.mean(arr)), float(stderr)
 
     cumulant_names = ["a2_tr", "a3_tr", "a2_rot", "a11"]
-    moment_names = ["c4", "c6", "w4", "c2w2"]
+    moment_names = ["c2", "c4", "c6", "w2", "w4", "c2w2"]
     result = {
         "n_realizations": len(summaries),
         "summary_paths": paths,
@@ -116,14 +116,24 @@ def aggregate_histograms(results_dir, suffix):
     }
 
 
-def maxwell_component_pdf(c):
-    """Reference PDF for one reduced component c_i = v_i / sqrt(2T/m)."""
-    return np.exp(-c * c) / np.sqrt(np.pi)
+def maxwell_speed_pdf(c):
+    """Reference PDF for c=|v|/sqrt(2T/m) in 3D."""
+    return (4.0 / np.sqrt(np.pi)) * c * c * np.exp(-c * c)
 
 
 def rayleigh_rot_speed_pdf(w):
     """Reference PDF for w = sqrt(w_y^2 + w_z^2), with <w^2> = 1."""
     return 2.0 * w * np.exp(-w * w)
+
+
+def maxwell_energy_pdf(epsilon):
+    """Reference PDF for epsilon=c^2 in 3D."""
+    return (2.0 / np.sqrt(np.pi)) * np.sqrt(epsilon) * np.exp(-epsilon)
+
+
+def exponential_energy_pdf(epsilon):
+    """Reference PDF for epsilon_r=w^2 with two rotational DOF."""
+    return np.exp(-epsilon)
 
 
 def histogram_ratio_to_reference(hist, reference):
@@ -141,13 +151,17 @@ def histogram_ratio_to_reference(hist, reference):
 def aggregate_non_gaussian_results(results_dir):
     """Aggregate summaries plus standard paper histogram ratios for one case."""
     result = aggregate_non_gaussian_summaries(results_dir)
-    tr = aggregate_histograms(results_dir, "_ng_hist_tr.txt")
-    rot_comp = aggregate_histograms(results_dir, "_ng_hist_rot_component.txt")
+    speed = aggregate_histograms(results_dir, "_ng_hist_speed.txt")
     rot_speed = aggregate_histograms(results_dir, "_ng_hist_rot_speed.txt")
+    energy_tr = aggregate_histograms(results_dir, "_ng_hist_energy_tr.txt")
+    energy_rot = aggregate_histograms(results_dir, "_ng_hist_energy_rot.txt")
     result["histograms"] = {
-        "tr_component": histogram_ratio_to_reference(tr, maxwell_component_pdf),
-        "rot_component": histogram_ratio_to_reference(rot_comp, maxwell_component_pdf),
+        "speed": histogram_ratio_to_reference(speed, maxwell_speed_pdf),
         "rot_speed": histogram_ratio_to_reference(rot_speed, rayleigh_rot_speed_pdf),
+        "energy_tr": histogram_ratio_to_reference(energy_tr, maxwell_energy_pdf),
+        "energy_rot": histogram_ratio_to_reference(
+            energy_rot, exponential_energy_pdf
+        ),
     }
     return result
 

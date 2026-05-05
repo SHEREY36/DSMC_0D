@@ -3,10 +3,10 @@ import math
 import numpy as np
 
 from .particle import compute_particle_params
-from .collision import CollisionModels, sample_dissp
+from .collision import sample_dissp
 from .pressure import compute_pij_k, accumulate_pij_c, normalise_pij_c
 from .non_gaussian import NonGaussianDiagnostics
-from .mu_joint import mu_plane_post_relative, mu_plane_post_relative_with_eps
+from .mu_joint import mu_plane_post_relative_with_eps
 from src.preprocessing.relaxation import prepare_theta, Zr
 
 
@@ -66,15 +66,11 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     sim_cfg = config.get('simulation', {})
     angular_transport_model = sim_cfg.get('angular_transport_model')
     if angular_transport_model is None:
-        angular_transport_model = (
-            'stress_weight'
-            if sim_cfg.get('use_stress_transport_weight', False)
-            else 'current'
-        )
-    if angular_transport_model not in ('current', 'stress_weight', 'ctc_conditional'):
+        angular_transport_model = 'current'
+    if angular_transport_model not in ('current', 'stress_weight'):
         raise ValueError(
             "simulation.angular_transport_model must be 'current', "
-            f"'stress_weight', or 'ctc_conditional', got {angular_transport_model!r}"
+            f"or 'stress_weight', got {angular_transport_model!r}"
         )
     angular_probability_override = sim_cfg.get(
         'angular_transport_probability_override'
@@ -113,10 +109,9 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         gamma_max = 0.0
         prob_one_hit = 1.0
         beta_a = beta_b = 0.0
-        use_zr_eff = False
-        theta_star_eff = gmm_theta2 = None
-        Z_R_eff_val = None
         C_alpha = 1.0
+        p_eta = 1.0
+        p_eta_elastic = 1.0
     else:
         if alpha < 1.0:
             gamma_max = models.get_gamma_max(alpha, params.AR)
@@ -127,43 +122,19 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
         beta_a = config['preprocessing']['dissipation']['beta_a']
         beta_b = config['preprocessing']['dissipation']['beta_b']
-        use_zr_eff_cfg = config.get('simulation', {}).get('use_zr_eff', False)
-        zr_eff_result = models.get_zr_eff(alpha, params.AR) if use_zr_eff_cfg else None
-        if zr_eff_result is not None:
-            theta_star_eff, Z_R_eff_val = zr_eff_result
-            gmm_theta2 = prepare_theta(theta_star_eff)
-            use_zr_eff = True
-        else:
-            theta_star_eff = None
-            gmm_theta2 = None
-            use_zr_eff = False
-            Z_R_eff_val = None
 
         C_alpha = config['system'].get('C_alpha') or models.get_C_alpha(alpha, params.AR)
         if angular_transport_model == 'stress_weight':
-            if angular_probability_override is not None:
-                w_eta = angular_probability_override
-                w_eta_elastic = angular_probability_override
-            elif models.stress_transport_table is None:
+            if angular_probability_override is None:
                 raise ValueError(
-                    "simulation.angular_transport_model='stress_weight', but no "
-                    "stress-transport table was loaded. Set "
-                    "simulation.stress_transport_weight_file to the JSON produced "
-                    "by diagnose_stress_transport_weight.py, or set "
-                    "simulation.angular_transport_probability_override."
+                    "simulation.angular_transport_model='stress_weight' now "
+                    "requires simulation.angular_transport_probability_override."
                 )
-            else:
-                w_eta = models.get_stress_transport_weight(alpha, params.AR)
-                w_eta_elastic = models.get_stress_transport_weight(1.0, params.AR)
+            p_eta = angular_probability_override
+            p_eta_elastic = angular_probability_override
         else:
-            w_eta = 1.0
-            w_eta_elastic = 1.0
-        if angular_transport_model == 'ctc_conditional' and not models.has_ctc_angular_model:
-            raise ValueError(
-                "simulation.angular_transport_model='ctc_conditional', but no "
-                "CTC angular model was loaded. Set simulation.ctc_angular_file "
-                "to the artifact from build_ctc_angular_lookup.py."
-            )
+            p_eta = 1.0
+            p_eta_elastic = 1.0
 
     # Flow mode
     flow_mode = config.get('flow', {}).get('mode', 'hcs')
@@ -202,19 +173,13 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     if sphere_mode:
         print(f"  Np={Np}, sphere_collision=True, alpha={alpha:.4f}, "
               f"sigma_c={params.sigma_c:.6f}, {flow_str}")
-    elif use_zr_eff:
-        print(f"  Np={Np}, Z_R_eff={Z_R_eff_val:.4f}, theta*={theta_star_eff:.4f}, "
-              f"C_alpha={C_alpha:.4f}, gamma_max={gamma_max:.6f}, "
-              f"prob_one_hit={prob_one_hit:.6f}, "
-              f"angular_transport={angular_transport_model}, "
-              f"w_eta={w_eta:.6f}, {flow_str}")
     else:
         print(f"  Np={Np}, eta={eta:.4f} (Zr), C_alpha={C_alpha:.4f}, "
               f"mu_chi_model={models.has_mu_chi_model}, "
               f"isotropic_eps={use_isotropic_eps}, "
               f"gamma_max={gamma_max:.6f}, prob_one_hit={prob_one_hit:.6f}, "
               f"angular_transport={angular_transport_model}, "
-              f"w_eta={w_eta:.6f}, "
+              f"p_eta={p_eta:.6f}, "
               f"equilibration_time={equilibration_time:.3f}, {flow_str}")
 
     ng_diag = NonGaussianDiagnostics(
@@ -354,7 +319,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
                         # Rotational relaxation
                         theta = temp_ratio
-                        Zr_val = Z_R_eff_val if use_zr_eff else Zr(theta, eta=1.0, alpha=alpha)
+                        Zr_val = Zr(theta, eta=1.0, alpha=alpha)
                         P_r = min(1.0 / Zr_val, 0.5)
 
                         relax_p1 = False
@@ -365,7 +330,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                         elif Rn < 2.0 * P_r:
                             relax_p2 = True
 
-                        theta2 = gmm_theta2 if use_zr_eff else prepare_theta(temp_ratio)
+                        theta2 = prepare_theta(temp_ratio)
 
                         if relax_p1:
                             if alpha >= 1.0:
@@ -431,20 +396,12 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                         # use_isotropic_eps → eps ~ Uniform(0,2pi) (orientation-
                         #   averaged result for smooth spherocylinders).
                         # has_eps_model → eps ~ vonMises(0, kappa(mu,alpha,AR)).
-                        # The stress-transport mixture keeps the scalar energy
-                        # model unchanged but only applies rank-2 angular
-                        # transport with probability w_eta.
+                        # The p_eta mixture keeps the scalar energy model
+                        # unchanged and thins only the angular direction update.
                         gpost_mag = 2.0 * cr_new
-                        if angular_transport_model == 'ctc_conditional':
-                            chi_rad, eps_rad = models.sample_ctc_angular(
-                                _alpha_scat, params.AR, mu_abs
-                            )
-                            gpost = mu_plane_post_relative_with_eps(
-                                vrel_vec, eij, chi_rad, gpost_mag, eps_rad
-                            )
-                        elif angular_transport_model == 'stress_weight':
-                            w_eta_scat = w_eta_elastic if in_equilibration else w_eta
-                            if np.random.random() < w_eta_scat:
+                        if angular_transport_model == 'stress_weight':
+                            p_eta_scat = p_eta_elastic if in_equilibration else p_eta
+                            if np.random.random() < p_eta_scat:
                                 if use_isotropic_eps:
                                     eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
                                 elif models.has_eps_model:

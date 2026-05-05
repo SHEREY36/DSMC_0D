@@ -13,6 +13,7 @@
 
 # ============================================================
 # DSMC_0D — HCS non-Gaussian paper campaign
+# Scalar speed/energy diagnostics, one realization per Slurm task.
 #
 # Grid:
 #   AR     = 1.0, 1.1, 1.25, 1.5, 2.0, 2.5, 3.0
@@ -34,7 +35,8 @@
 set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-runs/hcs_ng_paper}"
+CONFIG="${CONFIG:-config/default.yaml}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-runs/hcs_ng_speed_energy_paper}"
 mkdir -p logs "${OUTPUT_ROOT}"
 
 # Prevent thread oversubscription inside each one-core realization.
@@ -102,6 +104,7 @@ if [[ -n "${START_TAU_OVERRIDE:-}" ]]; then
 fi
 
 python run_hcs_ng_realization.py \
+  --config "${CONFIG}" \
   --AR "${AR}" \
   --alpha "${ALPHA}" \
   --seed "${SEED}" \

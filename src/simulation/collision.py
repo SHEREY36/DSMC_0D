@@ -96,10 +96,8 @@ class CollisionModels:
                 print(f"  Warning: f_tr table not found at {ftr_params_path}, "
                       f"f_tr sampling disabled (f_tr=0).")
 
-        # Z_R_eff table (optional; graceful fallback if absent)
-        if zr_eff_path is None:
-            zr_eff_path = os.path.join(self.model_dir, "zr_eff_table_AR20.json")
-        if os.path.exists(zr_eff_path):
+        # Z_R_eff table (optional; load only when explicitly requested)
+        if zr_eff_path and os.path.exists(zr_eff_path):
             self.zr_eff_table = load_zr_eff_table(zr_eff_path)
             print(f"  Loaded Z_R_eff table: {zr_eff_path}")
         else:

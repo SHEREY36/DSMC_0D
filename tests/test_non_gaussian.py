@@ -1,6 +1,10 @@
 import json
+import sys
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.simulation.non_gaussian import (
     NonGaussianDiagnostics,
@@ -28,15 +32,17 @@ def test_diagnostics_write_finite_hcs_outputs(tmp_path):
     vel = rng.normal(0.0, np.sqrt(Ttrans / mass), size=(Np, 3))
     vel -= vel.mean(axis=0)
     Er = rng.exponential(Trot, size=Np)
+    Er *= Trot / np.mean(Er)
 
     config = {
         "diagnostics": {
             "non_gaussian": {
                 "enabled": True,
                 "start_tau": 0.0,
-                "hist_tr_bins": 80,
-                "hist_rot_bins": 80,
                 "hist_speed_bins": 80,
+                "hist_rot_speed_bins": 80,
+                "hist_energy_tr_bins": 80,
+                "hist_energy_rot_bins": 80,
             }
         }
     }
@@ -54,12 +60,17 @@ def test_diagnostics_write_finite_hcs_outputs(tmp_path):
     assert np.isfinite(summary["cumulants"]["a2_tr"])
     assert np.isfinite(summary["cumulants"]["a2_rot"])
     assert np.isfinite(summary["cumulants"]["a11"])
+    assert np.isclose(summary["moments"]["c2"], 1.5, atol=2.0e-3)
+    assert np.isclose(summary["moments"]["w2"], 1.0, atol=2.0e-3)
 
     for suffix in [
-        "_ng_hist_tr.txt",
-        "_ng_hist_rot_component.txt",
+        "_ng_hist_speed.txt",
         "_ng_hist_rot_speed.txt",
+        "_ng_hist_energy_tr.txt",
+        "_ng_hist_energy_rot.txt",
     ]:
         data = np.loadtxt(tmp_path / f"case{suffix}")
-        integral = np.trapz(data[:, 1], data[:, 0])
+        integral = np.trapezoid(data[:, 1], data[:, 0])
         assert 0.90 < integral < 1.10
+
+    assert not (tmp_path / "case_ng_hist_rot_component.txt").exists()

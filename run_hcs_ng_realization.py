@@ -102,20 +102,27 @@ def build_campaign_config(base_config, AR, alpha, seed, output_root,
     cfg.setdefault("simulation", {})
     cfg["simulation"]["seeds"] = [int(seed)]
     cfg["simulation"]["output_dir"] = str(output_dir)
-    cfg["simulation"]["use_zr_eff"] = False
     cfg["simulation"]["sphere_collision"] = (AR == 1.0)
+    cfg["simulation"]["angular_transport_model"] = "current"
+    cfg["simulation"]["angular_transport_probability_override"] = None
+    cfg["simulation"].pop("use_zr_eff", None)
+    cfg["simulation"].pop("use_stress_transport_weight", None)
+    cfg["simulation"].pop("stress_transport_weight_file", None)
+    cfg["simulation"].pop("ctc_angular_file", None)
 
     cfg.setdefault("diagnostics", {}).setdefault("non_gaussian", {})
     cfg["diagnostics"]["non_gaussian"].update({
         "enabled": True,
         "start_tau": 20.0 if start_tau is None else float(start_tau),
         "sample_every_outputs": 1,
-        "hist_tr_bins": 240,
-        "hist_tr_range": [-5.0, 5.0],
-        "hist_rot_bins": 240,
-        "hist_rot_range": [-5.0, 5.0],
-        "hist_speed_bins": 200,
+        "hist_speed_bins": 240,
         "hist_speed_range": [0.0, 7.0],
+        "hist_rot_speed_bins": 240,
+        "hist_rot_speed_range": [0.0, 7.0],
+        "hist_energy_tr_bins": 240,
+        "hist_energy_tr_range": [0.0, 16.0],
+        "hist_energy_rot_bins": 240,
+        "hist_energy_rot_range": [0.0, 16.0],
         "write_time_series": True,
         "write_histograms": True,
     })
@@ -156,20 +163,11 @@ def load_models(config):
     model_dir = config["preprocessing"]["model_output_dir"]
     gmm_npz = config["preprocessing"]["gmm"].get("gmm_cond_file")
     ftr_path = config["preprocessing"].get("ftr", {}).get("ftr_params_file")
-    zr_eff_path = config.get("preprocessing", {}).get("zr_eff", {}).get(
-        "zr_eff_table_file"
-    )
     c_alpha_path = config.get("calibration", {}).get("C_alpha_table_file")
-    stress_transport_path = config.get("simulation", {}).get(
-        "stress_transport_weight_file"
-    )
-    ctc_angular_path = config.get("simulation", {}).get("ctc_angular_file")
     print(f"Loading models from {model_dir}...")
     return CollisionModels(
         model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path,
-        zr_eff_path=zr_eff_path, c_alpha_path=c_alpha_path,
-        stress_transport_path=stress_transport_path,
-        ctc_angular_path=ctc_angular_path
+        c_alpha_path=c_alpha_path
     )
 
 
@@ -209,7 +207,7 @@ def parse_args():
     parser.add_argument("--seed", type=int)
     parser.add_argument("--realization-index", type=int)
     parser.add_argument("--task-id", type=int, default=None)
-    parser.add_argument("--output-root", default="runs/hcs_ng_paper")
+    parser.add_argument("--output-root", default="runs/hcs_ng_speed_energy_paper")
     parser.add_argument(
         "--domain", default=None,
         help="Optional comma-separated domain override, e.g. 20,20,20"
