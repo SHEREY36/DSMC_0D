@@ -208,9 +208,15 @@ def _run_single_seed(task):
             "zr_eff_table_file"
         )
         c_alpha_path = config.get("calibration", {}).get("C_alpha_table_file")
+        stress_transport_path = config.get("simulation", {}).get(
+            "stress_transport_weight_file"
+        )
+        ctc_angular_path = config.get("simulation", {}).get("ctc_angular_file")
         models = CollisionModels(
             model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path,
-            zr_eff_path=zr_eff_path, c_alpha_path=c_alpha_path
+            zr_eff_path=zr_eff_path, c_alpha_path=c_alpha_path,
+            stress_transport_path=stress_transport_path,
+            ctc_angular_path=ctc_angular_path
         )
 
     AR = config["particle"]["AR"]

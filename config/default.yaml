@@ -29,6 +29,10 @@ simulation:
   output_dir: results/
   use_zr_eff: false  # true = fixed (theta*, Z_R_eff) from table; false = dynamic Zr(theta, eta)
   sphere_collision: false  # true = sphere mode; bypasses all empirical sub-models
+  angular_transport_model: ctc_conditional  # 'current', 'stress_weight', or 'ctc_conditional'
+  use_stress_transport_weight: false  # legacy alias; ignored when angular_transport_model is set
+  stress_transport_weight_file: models/stress_transport_weights_ARge15.json
+  ctc_angular_file: models/ctc_angular_conditional_ARge15.npz
 
 diagnostics:
   non_gaussian:

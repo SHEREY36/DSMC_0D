@@ -63,6 +63,19 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
     sphere_mode = config.get('simulation', {}).get('sphere_collision', False)
     use_isotropic_eps = config.get('simulation', {}).get('use_isotropic_eps', False)
+    sim_cfg = config.get('simulation', {})
+    angular_transport_model = sim_cfg.get('angular_transport_model')
+    if angular_transport_model is None:
+        angular_transport_model = (
+            'stress_weight'
+            if sim_cfg.get('use_stress_transport_weight', False)
+            else 'current'
+        )
+    if angular_transport_model not in ('current', 'stress_weight', 'ctc_conditional'):
+        raise ValueError(
+            "simulation.angular_transport_model must be 'current', "
+            f"'stress_weight', or 'ctc_conditional', got {angular_transport_model!r}"
+        )
 
     # Particle properties
     params = compute_particle_params(config)
@@ -112,6 +125,25 @@ def run_simulation(config, models, seed, output_path, pressure_path):
             Z_R_eff_val = None
 
         C_alpha = config['system'].get('C_alpha') or models.get_C_alpha(alpha, params.AR)
+        if angular_transport_model == 'stress_weight':
+            if models.stress_transport_table is None:
+                raise ValueError(
+                    "simulation.angular_transport_model='stress_weight', but no "
+                    "stress-transport table was loaded. Set "
+                    "simulation.stress_transport_weight_file to the JSON produced "
+                    "by diagnose_stress_transport_weight.py."
+                )
+            w_eta = models.get_stress_transport_weight(alpha, params.AR)
+            w_eta_elastic = models.get_stress_transport_weight(1.0, params.AR)
+        else:
+            w_eta = 1.0
+            w_eta_elastic = 1.0
+        if angular_transport_model == 'ctc_conditional' and not models.has_ctc_angular_model:
+            raise ValueError(
+                "simulation.angular_transport_model='ctc_conditional', but no "
+                "CTC angular model was loaded. Set simulation.ctc_angular_file "
+                "to the artifact from build_ctc_angular_lookup.py."
+            )
 
     # Flow mode
     flow_mode = config.get('flow', {}).get('mode', 'hcs')
@@ -153,12 +185,16 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     elif use_zr_eff:
         print(f"  Np={Np}, Z_R_eff={Z_R_eff_val:.4f}, theta*={theta_star_eff:.4f}, "
               f"C_alpha={C_alpha:.4f}, gamma_max={gamma_max:.6f}, "
-              f"prob_one_hit={prob_one_hit:.6f}, {flow_str}")
+              f"prob_one_hit={prob_one_hit:.6f}, "
+              f"angular_transport={angular_transport_model}, "
+              f"w_eta={w_eta:.6f}, {flow_str}")
     else:
         print(f"  Np={Np}, eta={eta:.4f} (Zr), C_alpha={C_alpha:.4f}, "
               f"mu_chi_model={models.has_mu_chi_model}, "
               f"isotropic_eps={use_isotropic_eps}, "
               f"gamma_max={gamma_max:.6f}, prob_one_hit={prob_one_hit:.6f}, "
+              f"angular_transport={angular_transport_model}, "
+              f"w_eta={w_eta:.6f}, "
               f"equilibration_time={equilibration_time:.3f}, {flow_str}")
 
     ng_diag = NonGaussianDiagnostics(
@@ -375,16 +411,41 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                         # use_isotropic_eps → eps ~ Uniform(0,2pi) (orientation-
                         #   averaged result for smooth spherocylinders).
                         # has_eps_model → eps ~ vonMises(0, kappa(mu,alpha,AR)).
+                        # The stress-transport mixture keeps the scalar energy
+                        # model unchanged but only applies rank-2 angular
+                        # transport with probability w_eta.
                         gpost_mag = 2.0 * cr_new
-                        if use_isotropic_eps:
-                            eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
-                        elif models.has_eps_model:
-                            eps_rad = models.sample_eps(mu_abs, _alpha_scat, params.AR)
+                        if angular_transport_model == 'ctc_conditional':
+                            chi_rad, eps_rad = models.sample_ctc_angular(
+                                _alpha_scat, params.AR, mu_abs
+                            )
+                            gpost = mu_plane_post_relative_with_eps(
+                                vrel_vec, eij, chi_rad, gpost_mag, eps_rad
+                            )
+                        elif angular_transport_model == 'stress_weight':
+                            w_eta_scat = w_eta_elastic if in_equilibration else w_eta
+                            if np.random.random() < w_eta_scat:
+                                if use_isotropic_eps:
+                                    eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
+                                elif models.has_eps_model:
+                                    eps_rad = models.sample_eps(mu_abs, _alpha_scat, params.AR)
+                                else:
+                                    eps_rad = 0.0
+                                gpost = mu_plane_post_relative_with_eps(
+                                    vrel_vec, eij, chi_rad, gpost_mag, eps_rad
+                                )
+                            else:
+                                gpost = gpost_mag * ghat
                         else:
-                            eps_rad = 0.0
-                        gpost = mu_plane_post_relative_with_eps(
-                            vrel_vec, eij, chi_rad, gpost_mag, eps_rad
-                        )
+                            if use_isotropic_eps:
+                                eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
+                            elif models.has_eps_model:
+                                eps_rad = models.sample_eps(mu_abs, _alpha_scat, params.AR)
+                            else:
+                                eps_rad = 0.0
+                            gpost = mu_plane_post_relative_with_eps(
+                                vrel_vec, eij, chi_rad, gpost_mag, eps_rad
+                            )
                         vel[p1, :] = vcom + 0.5 * gpost
                         vel[p2, :] = vcom - 0.5 * gpost
                         accumulate_pij_c(
