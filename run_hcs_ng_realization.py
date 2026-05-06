@@ -85,7 +85,7 @@ def _require_existing(path, description):
 def build_campaign_config(base_config, AR, alpha, seed, output_root,
                           domain=None, t_end=None, tau_end=None,
                           sample_start_tau=None, sample_end_tau=None,
-                          sample_delta_tau=None):
+                          sample_delta_tau=None, hcs_rescale=True):
     cfg = copy.deepcopy(base_config)
     AR = float(AR)
     alpha = float(alpha)
@@ -120,6 +120,8 @@ def build_campaign_config(base_config, AR, alpha, seed, output_root,
     cfg["simulation"]["sphere_collision"] = (AR == 1.0)
     cfg["simulation"]["angular_transport_model"] = "current"
     cfg["simulation"]["angular_transport_probability_override"] = None
+    cfg["simulation"]["hcs_rescale_temperature"] = bool(hcs_rescale)
+    cfg["simulation"]["hcs_rescale_reference"] = "initial"
     cfg["simulation"].pop("use_zr_eff", None)
     cfg["simulation"].pop("use_stress_transport_weight", None)
     cfg["simulation"].pop("stress_transport_weight_file", None)
@@ -247,6 +249,10 @@ def parse_args():
     parser.add_argument("--sample-start-tau", type=float, default=None)
     parser.add_argument("--sample-end-tau", type=float, default=None)
     parser.add_argument("--sample-delta-tau", type=float, default=None)
+    parser.add_argument(
+        "--no-hcs-rescale", action="store_true",
+        help="Disable HCS temperature rescaling for debugging comparisons."
+    )
     parser.add_argument("--write-manifest-only", action="store_true")
     parser.add_argument("--print-seeds", action="store_true")
     parser.add_argument("--print-total-tasks", action="store_true")
@@ -305,7 +311,8 @@ def main():
         domain=domain, t_end=args.t_end, tau_end=args.tau_end,
         sample_start_tau=sample_start_tau,
         sample_end_tau=args.sample_end_tau,
-        sample_delta_tau=args.sample_delta_tau
+        sample_delta_tau=args.sample_delta_tau,
+        hcs_rescale=not args.no_hcs_rescale
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path, pressure_path = build_output_paths(

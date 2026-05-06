@@ -97,6 +97,10 @@ class NonGaussianDiagnostics:
         self.final_t = 0.0
         self.final_NColl = 0
         self.moment_file = None
+        sim_cfg = config.get("simulation", {})
+        self.hcs_rescale_enabled = bool(
+            sim_cfg.get("hcs_rescale_temperature", False)
+        )
         self.sample_start_tau = float(self.cfg["sample_start_tau"])
         self.sample_end_tau = self.cfg["sample_end_tau"]
         self.sample_delta_tau = self.cfg["sample_delta_tau"]
@@ -128,6 +132,20 @@ class NonGaussianDiagnostics:
     def _derived_path(self, suffix):
         root, _ = os.path.splitext(self.output_path)
         return f"{root}{suffix}"
+
+    def _clean(self, value):
+        if isinstance(value, dict):
+            return {k: self._clean(v) for k, v in value.items()}
+        if value is None:
+            return None
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        if isinstance(value, (np.floating, float)):
+            value = float(value)
+            return value if np.isfinite(value) else None
+        if isinstance(value, (np.integer, int)):
+            return int(value)
+        return value
 
     def _expected_sample_count(self):
         if self.sample_end_tau is None or self.sample_delta_tau is None:
@@ -201,18 +219,18 @@ class NonGaussianDiagnostics:
 
     def maybe_sample(self, t, tau, output_index, vel, Er, Ttrans, Trot):
         if not self.enabled:
-            return
+            return False
         self.output_index = int(output_index)
         tol = 1.0e-10
         if tau + tol < self.next_sample_tau:
-            return
+            return False
         if (
             self.sample_end_tau is not None
             and self.next_sample_tau > self.sample_end_tau + tol
         ):
-            return
+            return False
         if Ttrans <= 0.0:
-            return
+            return False
 
         c = vel / np.sqrt(2.0 * Ttrans / self.mass)
         c2 = np.sum(c * c, axis=1)
@@ -256,6 +274,7 @@ class NonGaussianDiagnostics:
                 f"{w4:13.8f} {c2w2:13.8f} {self.sample_count:d} "
                 f"{self.particle_sample_count:d}\n"
             )
+            self.moment_file.flush()
 
         if self.cfg["write_histograms"]:
             c_mag = np.sqrt(c2)
@@ -279,6 +298,33 @@ class NonGaussianDiagnostics:
         else:
             while self.next_sample_tau <= tau + tol:
                 self.next_sample_tau += self.sample_delta_tau
+        self._write_progress(t, tau, Ttrans, Trot)
+        return True
+
+    def _write_progress(self, t, tau, Ttrans, Trot):
+        T_total = (
+            Ttrans if self.sphere_mode else (3.0 * Ttrans + 2.0 * Trot) / 5.0
+        )
+        progress = {
+            "enabled": True,
+            "seed": self.seed,
+            "current_t": t,
+            "current_tau": tau,
+            "Ttrans": Ttrans,
+            "Trot": None if self.sphere_mode else Trot,
+            "T_total": T_total,
+            "hcs_rescale_temperature": self.hcs_rescale_enabled,
+            "expected_output_samples": self.expected_sample_count,
+            "n_output_samples": self.sample_count,
+            "sampling_complete": (
+                self.expected_sample_count is not None
+                and self.sample_count >= self.expected_sample_count
+            ),
+            "n_particle_samples": self.particle_sample_count,
+        }
+        with open(self._derived_path("_ng_progress.json"), "w") as f:
+            json.dump(self._clean(progress), f, indent=2, sort_keys=True)
+            f.write("\n")
 
     def _density(self, counts, edges):
         total = np.sum(counts)
@@ -341,20 +387,6 @@ class NonGaussianDiagnostics:
             self.final_NColl / (2.0 * self.Np * self.final_t)
             if self.Np > 0 and self.final_t > 0.0 else np.nan
         )
-        def _clean(value):
-            if isinstance(value, dict):
-                return {k: _clean(v) for k, v in value.items()}
-            if value is None:
-                return None
-            if isinstance(value, (bool, np.bool_)):
-                return bool(value)
-            if isinstance(value, (np.floating, float)):
-                value = float(value)
-                return value if np.isfinite(value) else None
-            if isinstance(value, (np.integer, int)):
-                return int(value)
-            return value
-
         summary = {
             "enabled": True,
             "seed": self.seed,
@@ -373,6 +405,7 @@ class NonGaussianDiagnostics:
             "final_t": self.final_t,
             "final_NColl": self.final_NColl,
             "collision_frequency": nu,
+            "hcs_rescale_temperature": self.hcs_rescale_enabled,
             "moments": {
                 "c2": avg_c2,
                 "c4": avg_c4,
@@ -384,5 +417,5 @@ class NonGaussianDiagnostics:
             "cumulants": cumulants,
         }
         with open(self._derived_path("_ng_summary.json"), "w") as f:
-            json.dump(_clean(summary), f, indent=2, sort_keys=True)
+            json.dump(self._clean(summary), f, indent=2, sort_keys=True)
             f.write("\n")

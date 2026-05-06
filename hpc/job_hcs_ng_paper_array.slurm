@@ -12,7 +12,7 @@
 #SBATCH -e logs/hcs_ng_%A_%a.err
 
 # ============================================================
-# DSMC_0D — HCS non-Gaussian paper campaign
+# DSMC_0D — scaled-HCS non-Gaussian paper campaign
 # Scalar speed/energy diagnostics, one realization per Slurm task.
 #
 # Grid:
@@ -35,6 +35,7 @@
 # Pilot examples:
 #   T_END_OVERRIDE=0.2 DOMAIN_OVERRIDE=20,20,20 START_TAU_OVERRIDE=0.0 \
 #       sbatch --array=0-3%4 hpc/job_hcs_ng_paper_array.slurm
+#   HCS_RESCALE_OVERRIDE=0 sbatch --array=0-3%4 hpc/job_hcs_ng_paper_array.slurm
 #   sbatch --array=900-914%15 hpc/job_hcs_ng_paper_array.slurm
 # ============================================================
 
@@ -123,6 +124,9 @@ if [[ -n "${SAMPLE_END_TAU_OVERRIDE:-}" ]]; then
 fi
 if [[ -n "${SAMPLE_DELTA_TAU_OVERRIDE:-}" ]]; then
   EXTRA_ARGS+=(--sample-delta-tau "${SAMPLE_DELTA_TAU_OVERRIDE}")
+fi
+if [[ "${HCS_RESCALE_OVERRIDE:-1}" == "0" ]]; then
+  EXTRA_ARGS+=(--no-hcs-rescale)
 fi
 
 python run_hcs_ng_realization.py \

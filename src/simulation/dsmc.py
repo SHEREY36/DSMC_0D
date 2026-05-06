@@ -143,6 +143,18 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         raise ValueError(f"flow.mode must be 'hcs' or 'usf', got {flow_mode!r}")
     if flow_mode == 'usf' and gdot == 0.0:
         print("  Warning: USF mode with gdot=0 is equivalent to HCS.")
+    hcs_rescale_temperature = bool(
+        config.get('simulation', {}).get('hcs_rescale_temperature', False)
+    )
+    hcs_rescale_reference = config.get(
+        'simulation', {}
+    ).get('hcs_rescale_reference', 'initial')
+    if hcs_rescale_reference != 'initial':
+        raise ValueError(
+            "simulation.hcs_rescale_reference currently supports only 'initial'"
+        )
+    if hcs_rescale_temperature and flow_mode != 'hcs':
+        raise ValueError("HCS temperature rescaling is only valid for flow.mode='hcs'")
 
     # Time parameters
     dt = config['time']['dt']
@@ -165,6 +177,10 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     if sphere_mode:
         Er[:] = 0.0
         omega[:] = 0.0
+    if sphere_mode:
+        hcs_T_ref = float(kTt)
+    else:
+        hcs_T_ref = (3.0 * float(kTt) + 2.0 * float(kTr)) / 5.0
 
     vrmax = 5.0 * np.sqrt(2.0) * np.sqrt(kTt * params.omass)
 
@@ -177,7 +193,8 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     flow_str = f"flow={flow_mode}" + (f", gdot={gdot:.4f}" if flow_mode == 'usf' else "")
     if sphere_mode:
         print(f"  Np={Np}, sphere_collision=True, alpha={alpha:.4f}, "
-              f"sigma_c={params.sigma_c:.6f}, {flow_str}")
+              f"sigma_c={params.sigma_c:.6f}, "
+              f"hcs_rescale={hcs_rescale_temperature}, {flow_str}")
     else:
         print(f"  Np={Np}, eta={eta:.4f} (Zr), C_alpha={C_alpha:.4f}, "
               f"mu_chi_model={models.has_mu_chi_model}, "
@@ -185,6 +202,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
               f"gamma_max={gamma_max:.6f}, prob_one_hit={prob_one_hit:.6f}, "
               f"angular_transport={angular_transport_model}, "
               f"p_eta={p_eta:.6f}, "
+              f"hcs_rescale={hcs_rescale_temperature}, "
               f"equilibration_time={equilibration_time:.3f}, {flow_str}")
 
     ng_diag = NonGaussianDiagnostics(
@@ -230,6 +248,32 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     )
                     pij_c_acc[:] = 0.0
                     t_last_output = t
+
+                    if hcs_rescale_temperature:
+                        if sphere_mode:
+                            if Eksum <= 0.0:
+                                raise FloatingPointError(
+                                    "Cannot HCS-rescale sphere state with "
+                                    f"Ttrans={Eksum}"
+                                )
+                            scale2 = hcs_T_ref / Eksum
+                            vel *= np.sqrt(scale2)
+                            Eksum = hcs_T_ref
+                        else:
+                            if T_total <= 0.0:
+                                raise FloatingPointError(
+                                    "Cannot HCS-rescale spherocylinder state with "
+                                    f"T_total={T_total}"
+                                )
+                            scale2 = hcs_T_ref / T_total
+                            scale = np.sqrt(scale2)
+                            vel *= scale
+                            Er *= scale2
+                            Eksum *= scale2
+                            Ersum *= scale2
+                        vrmax = 5.0 * np.sqrt(2.0) * np.sqrt(
+                            max(Eksum, 1.0e-30) * params.omass
+                        )
 
                     Ntau += 1
 

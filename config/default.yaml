@@ -32,6 +32,8 @@ simulation:
   angular_transport_model: current  # 'current' or 'stress_weight'
   # Experimental stress_weight override: probability of full angular scattering.
   angular_transport_probability_override: null
+  hcs_rescale_temperature: false  # HCS-only thermostat for reduced-variable statistics
+  hcs_rescale_reference: initial   # currently supports 'initial'
 
 diagnostics:
   non_gaussian:
