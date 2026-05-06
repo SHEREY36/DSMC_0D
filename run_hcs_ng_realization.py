@@ -84,8 +84,9 @@ def _require_existing(path, description):
 
 def build_campaign_config(base_config, AR, alpha, seed, output_root,
                           domain=None, t_end=None, tau_end=None,
-                          sample_start_tau=None, sample_end_tau=None,
-                          sample_delta_tau=None, hcs_rescale=True):
+                          dt=None, sample_start_tau=None,
+                          sample_end_tau=None, sample_delta_tau=None,
+                          hcs_rescale=True):
     cfg = copy.deepcopy(base_config)
     AR = float(AR)
     alpha = float(alpha)
@@ -99,10 +100,10 @@ def build_campaign_config(base_config, AR, alpha, seed, output_root,
     cfg["system"]["kTt"] = 1.0
     cfg["system"]["kTr"] = 1.0
     cfg["system"]["phi"] = 0.01
-    cfg["system"]["domain"] = domain or [130, 130, 130]
+    cfg["system"]["domain"] = domain or [100, 100, 100]
     cfg["system"]["C_alpha"] = None
 
-    cfg["time"]["dt"] = 0.01
+    cfg["time"]["dt"] = 0.05 if dt is None else float(dt)
     cfg["time"]["dtau"] = (
         5.0 if sample_delta_tau is None else float(sample_delta_tau)
     )
@@ -245,6 +246,7 @@ def parse_args():
     )
     parser.add_argument("--t-end", type=float, default=None)
     parser.add_argument("--tau-end", type=float, default=None)
+    parser.add_argument("--dt", type=float, default=None)
     parser.add_argument("--start-tau", type=float, default=None)
     parser.add_argument("--sample-start-tau", type=float, default=None)
     parser.add_argument("--sample-end-tau", type=float, default=None)
@@ -308,7 +310,7 @@ def main():
     )
     config, output_dir = build_campaign_config(
         base_config, AR, alpha, seed, args.output_root,
-        domain=domain, t_end=args.t_end, tau_end=args.tau_end,
+        domain=domain, t_end=args.t_end, tau_end=args.tau_end, dt=args.dt,
         sample_start_tau=sample_start_tau,
         sample_end_tau=args.sample_end_tau,
         sample_delta_tau=args.sample_delta_tau,

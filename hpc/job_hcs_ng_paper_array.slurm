@@ -35,6 +35,8 @@
 # Pilot examples:
 #   T_END_OVERRIDE=0.2 DOMAIN_OVERRIDE=20,20,20 START_TAU_OVERRIDE=0.0 \
 #       sbatch --array=0-3%4 hpc/job_hcs_ng_paper_array.slurm
+#   DT_OVERRIDE=0.01 SAMPLE_START_TAU_OVERRIDE=50 SAMPLE_END_TAU_OVERRIDE=150 \
+#       sbatch --array=0-2%3 hpc/job_hcs_ng_paper_array.slurm
 #   HCS_RESCALE_OVERRIDE=0 sbatch --array=0-3%4 hpc/job_hcs_ng_paper_array.slurm
 #   sbatch --array=900-914%15 hpc/job_hcs_ng_paper_array.slurm
 # ============================================================
@@ -112,6 +114,9 @@ if [[ -n "${T_END_OVERRIDE:-}" ]]; then
 fi
 if [[ -n "${TAU_END_OVERRIDE:-}" ]]; then
   EXTRA_ARGS+=(--tau-end "${TAU_END_OVERRIDE}")
+fi
+if [[ -n "${DT_OVERRIDE:-}" ]]; then
+  EXTRA_ARGS+=(--dt "${DT_OVERRIDE}")
 fi
 if [[ -n "${START_TAU_OVERRIDE:-}" ]]; then
   EXTRA_ARGS+=(--sample-start-tau "${START_TAU_OVERRIDE}")
