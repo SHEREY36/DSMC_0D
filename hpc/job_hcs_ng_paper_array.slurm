@@ -7,7 +7,7 @@
 #SBATCH --mem=4G
 #SBATCH --time=48:00:00
 #SBATCH -J hcs_ng_paper
-#SBATCH --array=0-999%256
+#SBATCH --array=0-999%64
 #SBATCH -o logs/hcs_ng_%A_%a.out
 #SBATCH -e logs/hcs_ng_%A_%a.err
 
@@ -21,18 +21,24 @@
 #   seeds  = 100 fixed seeds
 #
 # Total tasks: 6 * 8 * 100 = 4800
-# Concurrency: %256 uses up to 256 cores at once.
+# Default concurrency: %64 keeps per-task throughput predictable.
 #
-# Submit full campaign from project root in three chunks.  Negishi rejects
+# Submit full campaign from project root with:
+#   bash hpc/submit_hcs_ng_campaign.sh
+#
+# Negishi rejects
 # array indices above the site array limit, so TASK_OFFSET maps each chunk back
-# onto the global 0..4799 campaign task id:
-#   TASK_OFFSET=0    sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
-#   TASK_OFFSET=1000 sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
-#   TASK_OFFSET=2000 sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
-#   TASK_OFFSET=3000 sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
-#   TASK_OFFSET=4000 sbatch --array=0-799%256 hpc/job_hcs_ng_paper_array.slurm
+# onto the global 0..4799 campaign task id.  If submitting manually, keep
+# chunks dependent or submit one at a time:
+#   TASK_OFFSET=0    sbatch --array=0-999%64 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=1000 sbatch --array=0-999%64 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=2000 sbatch --array=0-999%64 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=3000 sbatch --array=0-999%64 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=4000 sbatch --array=0-799%64 hpc/job_hcs_ng_paper_array.slurm
 #
 # Pilot examples:
+#   OUTPUT_ROOT=runs/hcs_ng_pilot_500s T_END_OVERRIDE=500 DT_OVERRIDE=0.05 \
+#       DOMAIN_OVERRIDE=100,100,100 sbatch --array=0-2%3 hpc/job_hcs_ng_paper_array.slurm
 #   T_END_OVERRIDE=0.2 DOMAIN_OVERRIDE=20,20,20 START_TAU_OVERRIDE=0.0 \
 #       sbatch --array=0-3%4 hpc/job_hcs_ng_paper_array.slurm
 #   DT_OVERRIDE=0.01 SAMPLE_START_TAU_OVERRIDE=50 SAMPLE_END_TAU_OVERRIDE=150 \
