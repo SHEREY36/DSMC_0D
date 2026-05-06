@@ -16,19 +16,21 @@
 # Scalar speed/energy diagnostics, one realization per Slurm task.
 #
 # Grid:
-#   AR     = 1.0, 1.1, 1.25, 1.5, 2.0, 2.5, 3.0
+#   AR     = 1.0, 1.1, 1.5, 2.0, 2.5, 3.0
 #   alpha  = 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95
-#   seeds  = 50 fixed seeds
+#   seeds  = 100 fixed seeds
 #
-# Total tasks: 7 * 8 * 50 = 2800
+# Total tasks: 6 * 8 * 100 = 4800
 # Concurrency: %256 uses up to 256 cores at once.
 #
 # Submit full campaign from project root in three chunks.  Negishi rejects
 # array indices above the site array limit, so TASK_OFFSET maps each chunk back
-# onto the global 0..2799 campaign task id:
+# onto the global 0..4799 campaign task id:
 #   TASK_OFFSET=0    sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
 #   TASK_OFFSET=1000 sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
-#   TASK_OFFSET=2000 sbatch --array=0-799%256 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=2000 sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=3000 sbatch --array=0-999%256 hpc/job_hcs_ng_paper_array.slurm
+#   TASK_OFFSET=4000 sbatch --array=0-799%256 hpc/job_hcs_ng_paper_array.slurm
 #
 # Pilot examples:
 #   T_END_OVERRIDE=0.2 DOMAIN_OVERRIDE=20,20,20 START_TAU_OVERRIDE=0.0 \
@@ -40,7 +42,7 @@ set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR}"
 CONFIG="${CONFIG:-config/default.yaml}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-runs/hcs_ng_speed_energy_paper}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-runs/hcs_ng_long_window}"
 mkdir -p logs "${OUTPUT_ROOT}"
 
 # Prevent thread oversubscription inside each one-core realization.
@@ -71,7 +73,7 @@ conda activate "${CONDA_ENV_PATH}"
 echo "Python: $(command -v python)"
 python --version
 
-ARS=(1.0 1.1 1.25 1.5 2.0 2.5 3.0)
+ARS=(1.0 1.1 1.5 2.0 2.5 3.0)
 ALPHAS=(0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95)
 read -r -a SEEDS <<< "$(python run_hcs_ng_realization.py --print-seeds)"
 
@@ -107,8 +109,20 @@ fi
 if [[ -n "${T_END_OVERRIDE:-}" ]]; then
   EXTRA_ARGS+=(--t-end "${T_END_OVERRIDE}")
 fi
+if [[ -n "${TAU_END_OVERRIDE:-}" ]]; then
+  EXTRA_ARGS+=(--tau-end "${TAU_END_OVERRIDE}")
+fi
 if [[ -n "${START_TAU_OVERRIDE:-}" ]]; then
-  EXTRA_ARGS+=(--start-tau "${START_TAU_OVERRIDE}")
+  EXTRA_ARGS+=(--sample-start-tau "${START_TAU_OVERRIDE}")
+fi
+if [[ -n "${SAMPLE_START_TAU_OVERRIDE:-}" ]]; then
+  EXTRA_ARGS+=(--sample-start-tau "${SAMPLE_START_TAU_OVERRIDE}")
+fi
+if [[ -n "${SAMPLE_END_TAU_OVERRIDE:-}" ]]; then
+  EXTRA_ARGS+=(--sample-end-tau "${SAMPLE_END_TAU_OVERRIDE}")
+fi
+if [[ -n "${SAMPLE_DELTA_TAU_OVERRIDE:-}" ]]; then
+  EXTRA_ARGS+=(--sample-delta-tau "${SAMPLE_DELTA_TAU_OVERRIDE}")
 fi
 
 python run_hcs_ng_realization.py \

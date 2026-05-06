@@ -6,16 +6,21 @@ import numpy as np
 
 DEFAULT_NON_GAUSSIAN_CONFIG = {
     "enabled": False,
+    "sample_start_tau": None,
+    "sample_end_tau": None,
+    "sample_delta_tau": None,
     "start_tau": 20.0,
     "sample_every_outputs": 1,
-    "hist_speed_bins": 200,
+    "hist_speed_bins": 256,
     "hist_speed_range": [0.0, 7.0],
-    "hist_rot_speed_bins": 200,
+    "hist_rot_speed_bins": 256,
     "hist_rot_speed_range": [0.0, 7.0],
-    "hist_energy_tr_bins": 200,
+    "hist_energy_tr_bins": 256,
     "hist_energy_tr_range": [0.0, 16.0],
-    "hist_energy_rot_bins": 200,
+    "hist_energy_rot_bins": 256,
     "hist_energy_rot_range": [0.0, 16.0],
+    "hist_energy_coupling_bins": 256,
+    "hist_energy_coupling_range": [0.0, 64.0],
     "write_time_series": True,
     "write_histograms": True,
 }
@@ -31,7 +36,26 @@ def get_non_gaussian_config(config):
     diag_cfg["hist_rot_speed_bins"] = int(diag_cfg["hist_rot_speed_bins"])
     diag_cfg["hist_energy_tr_bins"] = int(diag_cfg["hist_energy_tr_bins"])
     diag_cfg["hist_energy_rot_bins"] = int(diag_cfg["hist_energy_rot_bins"])
+    diag_cfg["hist_energy_coupling_bins"] = int(
+        diag_cfg["hist_energy_coupling_bins"]
+    )
     diag_cfg["start_tau"] = float(diag_cfg["start_tau"])
+    if diag_cfg["sample_start_tau"] is None:
+        diag_cfg["sample_start_tau"] = diag_cfg["start_tau"]
+    diag_cfg["sample_start_tau"] = float(diag_cfg["sample_start_tau"])
+    if diag_cfg["sample_end_tau"] is not None:
+        diag_cfg["sample_end_tau"] = float(diag_cfg["sample_end_tau"])
+    if diag_cfg["sample_delta_tau"] is not None:
+        diag_cfg["sample_delta_tau"] = float(diag_cfg["sample_delta_tau"])
+        if diag_cfg["sample_delta_tau"] <= 0.0:
+            raise ValueError("diagnostics.non_gaussian.sample_delta_tau must be > 0")
+    if (
+        diag_cfg["sample_end_tau"] is not None
+        and diag_cfg["sample_end_tau"] < diag_cfg["sample_start_tau"]
+    ):
+        raise ValueError(
+            "diagnostics.non_gaussian.sample_end_tau must be >= sample_start_tau"
+        )
     return diag_cfg
 
 
@@ -70,8 +94,14 @@ class NonGaussianDiagnostics:
         self.sample_count = 0
         self.particle_sample_count = 0
         self.final_tau = 0.0
+        self.final_t = 0.0
         self.final_NColl = 0
         self.moment_file = None
+        self.sample_start_tau = float(self.cfg["sample_start_tau"])
+        self.sample_end_tau = self.cfg["sample_end_tau"]
+        self.sample_delta_tau = self.cfg["sample_delta_tau"]
+        self.next_sample_tau = self.sample_start_tau
+        self.expected_sample_count = self._expected_sample_count()
 
         self.sum_c2 = 0.0
         self.sum_c4 = 0.0
@@ -85,10 +115,12 @@ class NonGaussianDiagnostics:
         self.rot_speed_edges = None
         self.energy_tr_edges = None
         self.energy_rot_edges = None
+        self.energy_coupling_edges = None
         self.speed_counts = None
         self.rot_speed_counts = None
         self.energy_tr_counts = None
         self.energy_rot_counts = None
+        self.energy_coupling_counts = None
 
         if self.enabled:
             self._init_outputs()
@@ -96,6 +128,12 @@ class NonGaussianDiagnostics:
     def _derived_path(self, suffix):
         root, _ = os.path.splitext(self.output_path)
         return f"{root}{suffix}"
+
+    def _expected_sample_count(self):
+        if self.sample_end_tau is None or self.sample_delta_tau is None:
+            return None
+        span = self.sample_end_tau - self.sample_start_tau
+        return int(np.floor(span / self.sample_delta_tau + 1.0e-10)) + 1
 
     def _init_outputs(self):
         output_dir = os.path.dirname(self.output_path)
@@ -121,6 +159,11 @@ class NonGaussianDiagnostics:
                 self.cfg["hist_energy_rot_range"][1],
                 self.cfg["hist_energy_rot_bins"] + 1
             )
+            self.energy_coupling_edges = np.linspace(
+                self.cfg["hist_energy_coupling_range"][0],
+                self.cfg["hist_energy_coupling_range"][1],
+                self.cfg["hist_energy_coupling_bins"] + 1
+            )
             self.speed_counts = np.zeros(self.cfg["hist_speed_bins"], dtype=np.float64)
             self.rot_speed_counts = np.zeros(
                 self.cfg["hist_rot_speed_bins"], dtype=np.float64
@@ -131,20 +174,24 @@ class NonGaussianDiagnostics:
             self.energy_rot_counts = np.zeros(
                 self.cfg["hist_energy_rot_bins"], dtype=np.float64
             )
+            self.energy_coupling_counts = np.zeros(
+                self.cfg["hist_energy_coupling_bins"], dtype=np.float64
+            )
 
         if self.cfg["write_time_series"]:
             self.moment_file = open(self._derived_path("_ng_moments.txt"), "w",
                                     buffering=1)
             self.moment_file.write(
                 "# t tau Ttrans Trot theta a2_tr a3_tr a2_rot a11 "
-                "c2 c4 c6 w2 w4 c2w2 n_samples_particles\n"
+                "c2 c4 c6 w2 w4 c2w2 sample_index n_samples_particles\n"
             )
 
-    def close(self, final_NColl, final_tau):
+    def close(self, final_NColl, final_tau, final_t=None):
         if not self.enabled:
             return
         self.final_NColl = int(final_NColl)
         self.final_tau = float(final_tau)
+        self.final_t = self.t_end if final_t is None else float(final_t)
         if self.moment_file is not None:
             self.moment_file.close()
             self.moment_file = None
@@ -156,9 +203,13 @@ class NonGaussianDiagnostics:
         if not self.enabled:
             return
         self.output_index = int(output_index)
-        if tau < self.cfg["start_tau"]:
+        tol = 1.0e-10
+        if tau + tol < self.next_sample_tau:
             return
-        if output_index % self.cfg["sample_every_outputs"] != 0:
+        if (
+            self.sample_end_tau is not None
+            and self.next_sample_tau > self.sample_end_tau + tol
+        ):
             return
         if Ttrans <= 0.0:
             return
@@ -202,7 +253,8 @@ class NonGaussianDiagnostics:
                 f"{cumulants['a3_tr']:13.8f} {cumulants['a2_rot']:13.8f} "
                 f"{cumulants['a11']:13.8f} {c2_mean:13.8f} "
                 f"{c4:13.8f} {c6:13.8f} {w2_mean:13.8f} "
-                f"{w4:13.8f} {c2w2:13.8f} {self.particle_sample_count:d}\n"
+                f"{w4:13.8f} {c2w2:13.8f} {self.sample_count:d} "
+                f"{self.particle_sample_count:d}\n"
             )
 
         if self.cfg["write_histograms"]:
@@ -217,6 +269,16 @@ class NonGaussianDiagnostics:
                 self.energy_rot_counts += np.histogram(
                     w2, bins=self.energy_rot_edges
                 )[0]
+                energy_coupling = c2 * w2
+                self.energy_coupling_counts += np.histogram(
+                    energy_coupling, bins=self.energy_coupling_edges
+                )[0]
+
+        if self.sample_delta_tau is None:
+            self.next_sample_tau = np.inf
+        else:
+            while self.next_sample_tau <= tau + tol:
+                self.next_sample_tau += self.sample_delta_tau
 
     def _density(self, counts, edges):
         total = np.sum(counts)
@@ -257,6 +319,12 @@ class NonGaussianDiagnostics:
             self._density(self.energy_rot_counts, self.energy_rot_edges),
             "# epsilon_r phi_energy_rot"
         )
+        self._write_histogram_file(
+            self._derived_path("_ng_hist_energy_coupling.txt"),
+            self.energy_coupling_edges,
+            self._density(self.energy_coupling_counts, self.energy_coupling_edges),
+            "# epsilon_t_epsilon_r phi_energy_coupling"
+        )
 
     def _write_summary(self):
         avg_c2 = self.sum_c2 / self.sample_count if self.sample_count else np.nan
@@ -270,8 +338,8 @@ class NonGaussianDiagnostics:
         )
         cumulants = cumulants_from_moments(avg_c4, avg_c6, avg_w4, avg_c2w2)
         nu = (
-            self.final_NColl / (2.0 * self.Np * self.t_end)
-            if self.Np > 0 and self.t_end > 0.0 else np.nan
+            self.final_NColl / (2.0 * self.Np * self.final_t)
+            if self.Np > 0 and self.final_t > 0.0 else np.nan
         )
         def _clean(value):
             if isinstance(value, dict):
@@ -291,10 +359,18 @@ class NonGaussianDiagnostics:
             "enabled": True,
             "seed": self.seed,
             "start_tau": self.cfg["start_tau"],
-            "sample_every_outputs": self.cfg["sample_every_outputs"],
+            "sample_start_tau": self.sample_start_tau,
+            "sample_end_tau": self.sample_end_tau,
+            "sample_delta_tau": self.sample_delta_tau,
+            "expected_output_samples": self.expected_sample_count,
             "n_output_samples": self.sample_count,
+            "sampling_complete": (
+                self.expected_sample_count is not None
+                and self.sample_count >= self.expected_sample_count
+            ),
             "n_particle_samples": self.particle_sample_count,
             "final_tau": self.final_tau,
+            "final_t": self.final_t,
             "final_NColl": self.final_NColl,
             "collision_frequency": nu,
             "moments": {

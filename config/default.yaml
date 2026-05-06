@@ -17,6 +17,7 @@ time:
   dt: 0.01
   dtau: 0.1
   t_end: 200
+  tau_end: null
   equilibration_time: 0.0
 
 flow:
@@ -36,15 +37,20 @@ diagnostics:
   non_gaussian:
     enabled: false  # passive HCS VDF/moment diagnostics for paper statistics
     start_tau: 20.0
+    sample_start_tau: null
+    sample_end_tau: null
+    sample_delta_tau: null
     sample_every_outputs: 1
-    hist_speed_bins: 200
+    hist_speed_bins: 256
     hist_speed_range: [0.0, 7.0]
-    hist_rot_speed_bins: 200
+    hist_rot_speed_bins: 256
     hist_rot_speed_range: [0.0, 7.0]
-    hist_energy_tr_bins: 200
+    hist_energy_tr_bins: 256
     hist_energy_tr_range: [0.0, 16.0]
-    hist_energy_rot_bins: 200
+    hist_energy_rot_bins: 256
     hist_energy_rot_range: [0.0, 16.0]
+    hist_energy_coupling_bins: 256
+    hist_energy_coupling_range: [0.0, 64.0]
     write_time_series: true
     write_histograms: true
 

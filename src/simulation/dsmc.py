@@ -149,6 +149,11 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     halfdt = dt * 0.5
     dtau = config['time']['dtau']
     t_end = config['time']['t_end']
+    tau_end = config['time'].get('tau_end')
+    if tau_end is not None:
+        tau_end = float(tau_end)
+        if tau_end <= 0.0:
+            raise ValueError(f"time.tau_end must be > 0 when set, got {tau_end}")
     equilibration_time = config['time'].get('equilibration_time', 0.0)
     if equilibration_time < 0.0:
         raise ValueError(
@@ -190,7 +195,14 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     try:
         with open(output_path, 'w', buffering=1) as file, open(pressure_path, 'w', buffering=1) as pfile:
-            while t < t_end:
+            while (
+                t < t_end
+                and (
+                    tau_end is None
+                    or NColl / float(Np) < tau_end
+                    or NColl / float(Np) >= Ntau * dtau
+                )
+            ):
                 # Output at intervals
                 if NColl / Np >= Ntau * dtau:
                     tau = NColl / float(Np)
@@ -435,7 +447,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
                 t += dt
     finally:
-        ng_diag.close(NColl, NColl / float(Np))
+        ng_diag.close(NColl, NColl / float(Np), final_t=t)
 
     print(f"  Simulation complete. NColl={NColl}, output: {output_path}")
 

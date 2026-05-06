@@ -18,11 +18,17 @@ def load_non_gaussian_moments(path):
     """Load one *_ng_moments.txt file as a named column dictionary."""
     data = np.loadtxt(path)
     data = np.atleast_2d(data)
-    cols = [
+    new_cols = [
+        "t", "tau", "Ttrans", "Trot", "theta", "a2_tr", "a3_tr",
+        "a2_rot", "a11", "c2", "c4", "c6", "w2", "w4", "c2w2",
+        "sample_index", "n_samples_particles",
+    ]
+    old_cols = [
         "t", "tau", "Ttrans", "Trot", "theta", "a2_tr", "a3_tr",
         "a2_rot", "a11", "c2", "c4", "c6", "w2", "w4", "c2w2",
         "n_samples_particles",
     ]
+    cols = new_cols if data.shape[1] >= len(new_cols) else old_cols
     if data.shape[1] < len(cols):
         raise ValueError(
             f"Moment file has {data.shape[1]} columns, expected {len(cols)}: {path}"
@@ -84,6 +90,12 @@ def aggregate_non_gaussian_summaries(results_dir):
     result["n_particle_samples"] = int(sum(
         s.get("n_particle_samples", 0) for s in summaries
     ))
+    result["expected_output_samples"] = int(max(
+        (s.get("expected_output_samples") or 0) for s in summaries
+    ))
+    result["complete_realizations"] = int(sum(
+        bool(s.get("sampling_complete", False)) for s in summaries
+    ))
     return result
 
 
@@ -97,11 +109,15 @@ def aggregate_histograms(results_dir, suffix):
     densities = []
     for path in paths:
         centers, density = load_histogram(path)
+        if not np.any(density > 0.0):
+            continue
         if centers_ref is None:
             centers_ref = centers
         elif centers.shape != centers_ref.shape or not np.allclose(centers, centers_ref):
             raise ValueError(f"Histogram bin centers do not match: {path}")
         densities.append(density)
+    if not densities:
+        raise FileNotFoundError(f"No populated *{suffix} files found in {results_dir}")
 
     arr = np.vstack(densities)
     stderr = (
@@ -136,6 +152,15 @@ def exponential_energy_pdf(epsilon):
     return np.exp(-epsilon)
 
 
+def maxwell_energy_coupling_pdf(x):
+    """Reference PDF for x=epsilon_t*epsilon_r.
+
+    Here epsilon_t~Gamma(3/2,1) and epsilon_r~Gamma(1,1), independent.
+    The product density reduces to 2 exp(-2 sqrt(x)).
+    """
+    return 2.0 * np.exp(-2.0 * np.sqrt(x))
+
+
 def histogram_ratio_to_reference(hist, reference):
     """Return density/reference with zeros where the reference is unavailable."""
     ref = reference(hist["centers"])
@@ -155,12 +180,18 @@ def aggregate_non_gaussian_results(results_dir):
     rot_speed = aggregate_histograms(results_dir, "_ng_hist_rot_speed.txt")
     energy_tr = aggregate_histograms(results_dir, "_ng_hist_energy_tr.txt")
     energy_rot = aggregate_histograms(results_dir, "_ng_hist_energy_rot.txt")
+    energy_coupling = aggregate_histograms(
+        results_dir, "_ng_hist_energy_coupling.txt"
+    )
     result["histograms"] = {
         "speed": histogram_ratio_to_reference(speed, maxwell_speed_pdf),
         "rot_speed": histogram_ratio_to_reference(rot_speed, rayleigh_rot_speed_pdf),
         "energy_tr": histogram_ratio_to_reference(energy_tr, maxwell_energy_pdf),
         "energy_rot": histogram_ratio_to_reference(
             energy_rot, exponential_energy_pdf
+        ),
+        "energy_coupling": histogram_ratio_to_reference(
+            energy_coupling, maxwell_energy_coupling_pdf
         ),
     }
     return result
