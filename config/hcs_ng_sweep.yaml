@@ -1,0 +1,161 @@
+base_config:
+  particle:
+    AR: 2.0
+    radius: 0.5
+    mass: 1.0
+    sigma_c_scale: 1.0
+
+  system:
+    kTt: 1.0
+    kTr: 1.0
+    alpha: 0.60
+    eta: 1.0
+    phi: 0.01
+    domain: [100, 100, 100]
+    C_alpha: null
+
+  time:
+    dt: 0.05
+    dtau: 5.0
+    t_end: 30000.0
+    tau_end: 1500.0
+    equilibration_time: 0.0
+
+  flow:
+    mode: hcs
+    shear_rate: 0.0
+
+  simulation:
+    seeds: [42]
+    output_dir: runs/hcs_ng_long_window/AR200/alpha_060/results
+    sphere_collision: false
+    angular_transport_model: current
+    angular_transport_probability_override: null
+    hcs_rescale_temperature: true
+    hcs_rescale_reference: initial
+
+  preprocessing:
+    model_output_dir: models/
+    gmm: {}
+    ftr: {}
+
+  calibration: {}
+
+  diagnostics:
+    non_gaussian:
+      enabled: true
+
+hcs_ng_sweep:
+  AR: 2.0
+  output_root: runs/hcs_ng_long_window
+  alpha_values: [0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+  seeds:
+    - 42
+    - 123
+    - 456
+    - 789
+    - 1001
+    - 2024
+    - 3141
+    - 2718
+    - 5772
+    - 8119
+    - 10103
+    - 12109
+    - 14153
+    - 16127
+    - 18131
+    - 20143
+    - 22147
+    - 24151
+    - 26161
+    - 28163
+    - 30169
+    - 32189
+    - 34211
+    - 36217
+    - 38219
+    - 40231
+    - 42239
+    - 44249
+    - 46261
+    - 48271
+    - 50273
+    - 52289
+    - 54311
+    - 56333
+    - 58337
+    - 60343
+    - 62347
+    - 64381
+    - 66383
+    - 68411
+    - 70423
+    - 72431
+    - 74453
+    - 76463
+    - 78467
+    - 80473
+    - 82483
+    - 84499
+    - 86501
+    - 88513
+    - 90523
+    - 92531
+    - 94543
+    - 96557
+    - 98561
+    - 100573
+    - 102587
+    - 104593
+    - 106619
+    - 108631
+    - 110641
+    - 112657
+    - 114671
+    - 116681
+    - 118687
+    - 120691
+    - 122699
+    - 124703
+    - 126713
+    - 128717
+    - 130729
+    - 132739
+    - 134743
+    - 136751
+    - 138763
+    - 140779
+    - 142789
+    - 144791
+    - 146807
+    - 148829
+    - 150833
+    - 152837
+    - 154841
+    - 156859
+    - 158869
+    - 160873
+    - 162887
+    - 164893
+    - 166909
+    - 168929
+    - 170933
+    - 172933
+    - 174949
+    - 176959
+    - 178963
+    - 180979
+    - 182983
+    - 184997
+    - 187003
+    - 189017
+  workers: 44
+  domain: [100, 100, 100]
+  dt: 0.05
+  t_end: 30000.0
+  tau_end: 1500.0
+  sample_start_tau: 500.0
+  sample_end_tau: 1500.0
+  sample_delta_tau: 5.0
+  hcs_rescale_temperature: true
