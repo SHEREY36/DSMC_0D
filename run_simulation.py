@@ -36,12 +36,16 @@ def main():
             'stress_transport_weight_file'
         )
         ctc_angular_path = config.get('simulation', {}).get('ctc_angular_file')
+        vss_alpha_eff_path = config.get('simulation', {}).get(
+            'vss_alpha_eff_table_file'
+        )
         print(f"Loading models from {model_dir}...")
         models = CollisionModels(
             model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path,
             zr_eff_path=zr_eff_path, c_alpha_path=c_alpha_path,
             stress_transport_path=stress_transport_path,
-            ctc_angular_path=ctc_angular_path
+            ctc_angular_path=ctc_angular_path,
+            vss_alpha_eff_path=vss_alpha_eff_path
         )
 
     run_all_realizations(config, models)

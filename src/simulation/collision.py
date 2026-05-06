@@ -13,6 +13,10 @@ from src.preprocessing.zr_eff_table import load_zr_eff_table, lookup_zr_eff
 from src.preprocessing.mu_chi_model import load_mu_chi_model, sample_chi_given_mu
 from src.preprocessing.fit_eps_model import load_eps_model, sample_eps_given_mu
 from src.simulation.ctc_angular import CTCAngularModel
+from src.simulation.vss_rank2 import (
+    load_vss_alpha_eff_table,
+    lookup_vss_alpha_eff,
+)
 
 
 class CollisionModels:
@@ -20,7 +24,7 @@ class CollisionModels:
 
     def __init__(self, model_dir, gmm_npz_path=None, ftr_params_path=None,
                  zr_eff_path=None, c_alpha_path=None, stress_transport_path=None,
-                 ctc_angular_path=None):
+                 ctc_angular_path=None, vss_alpha_eff_path=None):
         """Load all model artifacts.
 
         Parameters:
@@ -36,15 +40,16 @@ class CollisionModels:
             stress_transport_path: optional stress-transport weight JSON from
                                    diagnose_stress_transport_weight.py.
             ctc_angular_path: optional CTC angular conditional .npz artifact.
+            vss_alpha_eff_path: optional VSS rank-2 alpha_eff JSON table.
         """
         self.model_dir = model_dir
         self._load_all(
             gmm_npz_path, ftr_params_path, zr_eff_path, c_alpha_path,
-            stress_transport_path, ctc_angular_path
+            stress_transport_path, ctc_angular_path, vss_alpha_eff_path
         )
 
     def _load_all(self, gmm_npz_path, ftr_params_path, zr_eff_path, c_alpha_path,
-                  stress_transport_path, ctc_angular_path):
+                  stress_transport_path, ctc_angular_path, vss_alpha_eff_path):
         """Load all serialized model artifacts from disk."""
         # Conditional GMM (from pre-computed .npz)
         if gmm_npz_path is None:
@@ -136,6 +141,20 @@ class CollisionModels:
                 print(
                     f"  Warning: CTC angular model not found at "
                     f"{ctc_angular_path}; CTC angular transport disabled."
+                )
+
+        # VSS rank-2 alpha_eff table (optional)
+        if vss_alpha_eff_path and os.path.exists(vss_alpha_eff_path):
+            self.vss_alpha_eff_table = load_vss_alpha_eff_table(
+                vss_alpha_eff_path
+            )
+            print(f"  Loaded VSS alpha_eff table: {vss_alpha_eff_path}")
+        else:
+            self.vss_alpha_eff_table = None
+            if vss_alpha_eff_path:
+                print(
+                    f"  Warning: VSS alpha_eff table not found at "
+                    f"{vss_alpha_eff_path}; vss_rank2 angular mode disabled."
                 )
 
         # Conditional chi Beta model (optional — falls back to marginal rejection sampler)
@@ -253,6 +272,16 @@ class CollisionModels:
                 "or set simulation.ctc_angular_file."
             )
         return self.ctc_angular_model.sample(alpha, AR, mu, rng=rng)
+
+    def get_vss_alpha_eff(self, alpha, AR):
+        """Look up the VSS rank-2 alpha_eff exponent."""
+        if self.vss_alpha_eff_table is None:
+            raise RuntimeError(
+                "VSS alpha_eff table not loaded. Run "
+                "build_vss_alpha_eff_table.py or set "
+                "simulation.vss_alpha_eff_table_file."
+            )
+        return lookup_vss_alpha_eff(self.vss_alpha_eff_table, alpha, AR)
 
 
 def load_stress_transport_weights(filepath):

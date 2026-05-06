@@ -29,9 +29,10 @@ simulation:
   seeds: [42]
   output_dir: results/
   sphere_collision: false  # true = sphere mode; bypasses all empirical sub-models
-  angular_transport_model: current  # 'current' or 'stress_weight'
+  angular_transport_model: current  # 'current', 'stress_weight', or 'vss_rank2'
   # Experimental stress_weight override: probability of full angular scattering.
   angular_transport_probability_override: null
+  vss_alpha_eff_table_file: models/vss_alpha_eff_table_AR20_peta060.json
   hcs_rescale_temperature: false  # HCS-only thermostat for reduced-variable statistics
   hcs_rescale_reference: initial   # currently supports 'initial'
 

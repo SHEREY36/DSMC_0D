@@ -9,6 +9,7 @@ from .collision import sample_dissp
 from .pressure import compute_pij_k, accumulate_pij_c, normalise_pij_c
 from .non_gaussian import NonGaussianDiagnostics
 from .mu_joint import mu_plane_post_relative_with_eps
+from .vss_rank2 import sample_vss_chi
 from src.preprocessing.relaxation import prepare_theta, Zr
 
 
@@ -69,10 +70,10 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     angular_transport_model = sim_cfg.get('angular_transport_model')
     if angular_transport_model is None:
         angular_transport_model = 'current'
-    if angular_transport_model not in ('current', 'stress_weight'):
+    if angular_transport_model not in ('current', 'stress_weight', 'vss_rank2'):
         raise ValueError(
             "simulation.angular_transport_model must be 'current', "
-            f"or 'stress_weight', got {angular_transport_model!r}"
+            f"'stress_weight', or 'vss_rank2', got {angular_transport_model!r}"
         )
     angular_probability_override = sim_cfg.get(
         'angular_transport_probability_override'
@@ -114,6 +115,8 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         C_alpha = 1.0
         p_eta = 1.0
         p_eta_elastic = 1.0
+        vss_alpha_eff = None
+        vss_alpha_eff_elastic = None
     else:
         if alpha < 1.0:
             gamma_max = models.get_gamma_max(alpha, params.AR)
@@ -137,6 +140,13 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         else:
             p_eta = 1.0
             p_eta_elastic = 1.0
+
+        if angular_transport_model == 'vss_rank2':
+            vss_alpha_eff = models.get_vss_alpha_eff(alpha, params.AR)
+            vss_alpha_eff_elastic = models.get_vss_alpha_eff(1.0, params.AR)
+        else:
+            vss_alpha_eff = None
+            vss_alpha_eff_elastic = None
 
     # Flow mode
     flow_mode = config.get('flow', {}).get('mode', 'hcs')
@@ -233,6 +243,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
               f"gamma_max={gamma_max:.6f}, prob_one_hit={prob_one_hit:.6f}, "
               f"angular_transport={angular_transport_model}, "
               f"p_eta={p_eta:.6f}, "
+              f"vss_alpha_eff={vss_alpha_eff if vss_alpha_eff is not None else 'n/a'}, "
               f"hcs_rescale={hcs_rescale_temperature}, "
               f"equilibration_time={equilibration_time:.3f}, {flow_str}")
 
@@ -374,15 +385,21 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
                         in_equilibration = t < equilibration_time
 
-                        # Scattering angle: hard-sphere chi_hs(mu, alpha).
-                        # Validation showed the stochastic conditional-chi
-                        # Beta model introduces wrong-sign anisotropy artifacts;
-                        # chi_hs paired with the vonMises eps model gives the
-                        # correct directional distribution (see plot_eps_model_tensor.py).
                         ghat = vrel_vec / max(vr, 1.0e-30)
                         mu_abs = abs(float(np.dot(eij, ghat)))
                         _alpha_scat = 1.0 if in_equilibration else alpha
-                        chi_rad = _chi_hs(mu_abs, _alpha_scat)
+                        if angular_transport_model == 'vss_rank2':
+                            alpha_eff_scat = (
+                                vss_alpha_eff_elastic
+                                if in_equilibration else vss_alpha_eff
+                            )
+                            chi_rad = sample_vss_chi(alpha_eff_scat)
+                        else:
+                            # Validation showed the stochastic conditional-chi
+                            # Beta model introduces wrong-sign anisotropy artifacts;
+                            # chi_hs paired with the vonMises eps model gives the
+                            # correct directional distribution (see plot_eps_model_tensor.py).
+                            chi_rad = _chi_hs(mu_abs, _alpha_scat)
 
                         # Rotational relaxation
                         theta = temp_ratio
@@ -480,6 +497,11 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                                 )
                             else:
                                 gpost = gpost_mag * ghat
+                        elif angular_transport_model == 'vss_rank2':
+                            eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
+                            gpost = mu_plane_post_relative_with_eps(
+                                vrel_vec, eij, chi_rad, gpost_mag, eps_rad
+                            )
                         else:
                             if use_isotropic_eps:
                                 eps_rad = np.random.uniform(0.0, 2.0 * np.pi)

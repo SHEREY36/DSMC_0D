@@ -196,10 +196,13 @@ def load_models(config):
     gmm_npz = config["preprocessing"]["gmm"].get("gmm_cond_file")
     ftr_path = config["preprocessing"].get("ftr", {}).get("ftr_params_file")
     c_alpha_path = config.get("calibration", {}).get("C_alpha_table_file")
+    vss_alpha_eff_path = config.get("simulation", {}).get(
+        "vss_alpha_eff_table_file"
+    )
     print(f"Loading models from {model_dir}...")
     return CollisionModels(
         model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path,
-        c_alpha_path=c_alpha_path
+        c_alpha_path=c_alpha_path, vss_alpha_eff_path=vss_alpha_eff_path
     )
 
 
