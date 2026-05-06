@@ -1,5 +1,7 @@
 import os
 import math
+from contextlib import nullcontext
+
 import numpy as np
 
 from .particle import compute_particle_params
@@ -182,12 +184,41 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     else:
         hcs_T_ref = (3.0 * float(kTt) + 2.0 * float(kTr)) / 5.0
 
+    def _rescale_hcs_state():
+        if sphere_mode:
+            T_now = (params.mass * np.sum(np.sum(vel**2, axis=1))
+                     / (3.0 * Np))
+            if T_now <= 0.0:
+                raise FloatingPointError(
+                    f"Cannot HCS-rescale sphere state with Ttrans={T_now}"
+                )
+            scale2 = hcs_T_ref / T_now
+            scale = np.sqrt(scale2)
+            vel[:] *= scale
+            return scale
+
+        Ttrans_now = (params.mass * np.sum(np.sum(vel**2, axis=1))
+                      / (3.0 * Np))
+        Trot_now = np.sum(Er) / float(Np)
+        Ttotal_now = (3.0 * Ttrans_now + 2.0 * Trot_now) / 5.0
+        if Ttotal_now <= 0.0:
+            raise FloatingPointError(
+                "Cannot HCS-rescale spherocylinder state with "
+                f"T_total={Ttotal_now}"
+            )
+        scale2 = hcs_T_ref / Ttotal_now
+        scale = np.sqrt(scale2)
+        vel[:] *= scale
+        Er[:] *= scale2
+        return scale
+
     vrmax = 5.0 * np.sqrt(2.0) * np.sqrt(kTt * params.omass)
 
     NColl = 0
     t = 0.0
     Ntau = 0
-    pij_c_acc = np.zeros((3, 3))
+    write_pressure = flow_mode == 'usf'
+    pij_c_acc = np.zeros((3, 3)) if write_pressure else None
     t_last_output = 0.0
 
     flow_str = f"flow={flow_mode}" + (f", gdot={gdot:.4f}" if flow_mode == 'usf' else "")
@@ -212,7 +243,11 @@ def run_simulation(config, models, seed, output_path, pressure_path):
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     try:
-        with open(output_path, 'w', buffering=1) as file, open(pressure_path, 'w', buffering=1) as pfile:
+        pressure_context = (
+            open(pressure_path, 'w', buffering=1)
+            if write_pressure else nullcontext(None)
+        )
+        with open(output_path, 'w', buffering=1) as file, pressure_context as pfile:
             while (
                 t < t_end
                 and (
@@ -236,44 +271,19 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     ng_diag.maybe_sample(t, tau, Ntau, vel, Er, Eksum, Ersum)
 
                     # Pressure tensor output
-                    pij_k = compute_pij_k(vel, params.mass, volsys)
-                    dt_output = t - t_last_output
-                    pij_c = normalise_pij_c(pij_c_acc, dt_output, volsys)
-                    pfile.write(
-                        f"{t:13.6f} {tau:13.6f} "
-                        f"{pij_k[0,0]:13.6f} {pij_k[0,1]:13.6f} {pij_k[0,2]:13.6f} "
-                        f"{pij_k[1,1]:13.6f} {pij_k[1,2]:13.6f} {pij_k[2,2]:13.6f} "
-                        f"{pij_c[0,0]:13.6f} {pij_c[0,1]:13.6f} {pij_c[0,2]:13.6f} "
-                        f"{pij_c[1,1]:13.6f} {pij_c[1,2]:13.6f} {pij_c[2,2]:13.6f}\n"
-                    )
-                    pij_c_acc[:] = 0.0
-                    t_last_output = t
-
-                    if hcs_rescale_temperature:
-                        if sphere_mode:
-                            if Eksum <= 0.0:
-                                raise FloatingPointError(
-                                    "Cannot HCS-rescale sphere state with "
-                                    f"Ttrans={Eksum}"
-                                )
-                            scale2 = hcs_T_ref / Eksum
-                            vel *= np.sqrt(scale2)
-                            Eksum = hcs_T_ref
-                        else:
-                            if T_total <= 0.0:
-                                raise FloatingPointError(
-                                    "Cannot HCS-rescale spherocylinder state with "
-                                    f"T_total={T_total}"
-                                )
-                            scale2 = hcs_T_ref / T_total
-                            scale = np.sqrt(scale2)
-                            vel *= scale
-                            Er *= scale2
-                            Eksum *= scale2
-                            Ersum *= scale2
-                        vrmax = 5.0 * np.sqrt(2.0) * np.sqrt(
-                            max(Eksum, 1.0e-30) * params.omass
+                    if write_pressure:
+                        pij_k = compute_pij_k(vel, params.mass, volsys)
+                        dt_output = t - t_last_output
+                        pij_c = normalise_pij_c(pij_c_acc, dt_output, volsys)
+                        pfile.write(
+                            f"{t:13.6f} {tau:13.6f} "
+                            f"{pij_k[0,0]:13.6f} {pij_k[0,1]:13.6f} {pij_k[0,2]:13.6f} "
+                            f"{pij_k[1,1]:13.6f} {pij_k[1,2]:13.6f} {pij_k[2,2]:13.6f} "
+                            f"{pij_c[0,0]:13.6f} {pij_c[0,1]:13.6f} {pij_c[0,2]:13.6f} "
+                            f"{pij_c[1,1]:13.6f} {pij_c[1,2]:13.6f} {pij_c[2,2]:13.6f}\n"
                         )
+                        pij_c_acc[:] = 0.0
+                        t_last_output = t
 
                     Ntau += 1
 
@@ -326,10 +336,11 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                         vel[p1, :] = v1 - COR_PP * CR * eij
                         vel[p2, :] = v2 + COR_PP * CR * eij
                         vr = np.linalg.norm(vrel_vec)
-                        accumulate_pij_c(
-                            pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
-                            eij_override=eij
-                        )
+                        if write_pressure:
+                            accumulate_pij_c(
+                                pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
+                                eij_override=eij
+                            )
 
                     else:
                         # Spherocylinder NTC: draw eij isotropically, accept on |eij · g|.
@@ -481,13 +492,17 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                             )
                         vel[p1, :] = vcom + 0.5 * gpost
                         vel[p2, :] = vcom - 0.5 * gpost
-                        accumulate_pij_c(
-                            pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
-                            eij_override=eij
-                        )
+                        if write_pressure:
+                            accumulate_pij_c(
+                                pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
+                                eij_override=eij
+                            )
 
                 if vrmax < vrmax_temp:
                     vrmax = vrmax_temp
+
+                if hcs_rescale_temperature:
+                    vrmax *= _rescale_hcs_state()
 
                 t += dt
     finally:
