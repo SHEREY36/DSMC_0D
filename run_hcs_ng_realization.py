@@ -8,6 +8,8 @@ import argparse
 import copy
 import csv
 import os
+import signal
+import shutil
 from pathlib import Path
 
 import yaml
@@ -151,6 +153,7 @@ def build_campaign_config(base_config, AR, alpha, seed, output_root,
         "hist_energy_coupling_range": [0.0, 64.0],
         "write_time_series": True,
         "write_histograms": True,
+        "write_progress": False,
     })
 
     cfg.setdefault("preprocessing", {}).setdefault("gmm", {})
@@ -185,6 +188,68 @@ def build_output_paths(output_dir, AR, alpha, realization_index):
     output_path = Path(output_dir) / f"{stem}.txt"
     pressure_path = Path(output_dir) / f"{stem}_pressure.txt"
     return output_path, pressure_path
+
+
+def copy_realization_outputs(source_dir, final_dir):
+    """Copy all files produced for one realization into its final directory."""
+    source_dir = Path(source_dir)
+    final_dir = Path(final_dir)
+    if not source_dir.exists():
+        return []
+
+    final_dir.mkdir(parents=True, exist_ok=True)
+    copied = []
+    for path in sorted(source_dir.iterdir()):
+        if not path.is_file():
+            continue
+        dest = final_dir / path.name
+        shutil.copy2(path, dest)
+        copied.append(dest)
+    return copied
+
+
+def _raise_for_shutdown(signum, _frame):
+    raise SystemExit(128 + int(signum))
+
+
+def install_shutdown_handlers():
+    """Let Python unwind finally blocks on scheduler stop signals."""
+    signal.signal(signal.SIGTERM, _raise_for_shutdown)
+    signal.signal(signal.SIGINT, _raise_for_shutdown)
+
+
+def run_with_optional_local_staging(config, models, seed, output_dir,
+                                    output_path, pressure_path, local_workdir):
+    """Run a realization locally when requested, then copy outputs to scratch.
+
+    The copy happens in a finally block so failed or timed-out runs still leave
+    partial diagnostics when Python gets a chance to unwind.
+    """
+    if not local_workdir:
+        run_simulation(config, models, seed, str(output_path), str(pressure_path))
+        return
+
+    final_output_dir = Path(output_dir)
+    local_output_dir = (
+        Path(local_workdir)
+        / final_output_dir.parent.parent.name
+        / final_output_dir.parent.name
+        / final_output_dir.name
+    )
+    local_output_dir.mkdir(parents=True, exist_ok=True)
+    local_output_path = local_output_dir / Path(output_path).name
+    local_pressure_path = local_output_dir / Path(pressure_path).name
+
+    print(f"Using node-local output staging: {local_output_dir}")
+    try:
+        run_simulation(
+            config, models, seed, str(local_output_path), str(local_pressure_path)
+        )
+    finally:
+        copied = copy_realization_outputs(local_output_dir, final_output_dir)
+        print(
+            f"Copied {len(copied)} staged output file(s) to {final_output_dir}"
+        )
 
 
 def load_models(config):
@@ -259,12 +324,24 @@ def parse_args():
         help="Disable HCS temperature rescaling for debugging comparisons."
     )
     parser.add_argument("--write-manifest-only", action="store_true")
+    parser.add_argument(
+        "--skip-manifest", action="store_true",
+        help="Do not create/check the campaign manifest during this realization."
+    )
+    parser.add_argument(
+        "--local-workdir", default=None,
+        help=(
+            "Optional node-local directory for hot-path outputs. Files are copied "
+            "to --output-root at task exit."
+        ),
+    )
     parser.add_argument("--print-seeds", action="store_true")
     parser.add_argument("--print-total-tasks", action="store_true")
     return parser.parse_args()
 
 
 def main():
+    install_shutdown_handlers()
     args = parse_args()
     if args.print_seeds:
         print(" ".join(str(seed) for seed in SEEDS))
@@ -299,7 +376,8 @@ def main():
         seed = args.seed
         realization_index = args.realization_index
 
-    ensure_manifest(args.output_root)
+    if not args.skip_manifest:
+        ensure_manifest(args.output_root)
     with open(args.config, "r") as f:
         _raw = yaml.safe_load(f)
     base_config = _raw["base_config"] if "base_config" in _raw else _raw
@@ -329,8 +407,9 @@ def main():
         f"seed={seed}, R={realization_index}, output={output_dir}"
     )
     models = load_models(config)
-    run_simulation(
-        config, models, seed, str(output_path), str(pressure_path)
+    run_with_optional_local_staging(
+        config, models, seed, output_dir, output_path, pressure_path,
+        args.local_workdir
     )
 
 

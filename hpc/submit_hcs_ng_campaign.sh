@@ -7,6 +7,7 @@ set -euo pipefail
 
 JOB_SCRIPT="${JOB_SCRIPT:-hpc/job_hcs_ng_paper_array.slurm}"
 CONCURRENCY="${CONCURRENCY:-64}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${RCAC_SCRATCH:-${SCRATCH:-runs}}/hcs_ng_long_window}"
 
 if [[ ! -f "${JOB_SCRIPT}" ]]; then
   echo "ERROR: job script not found: ${JOB_SCRIPT}" >&2
@@ -23,14 +24,14 @@ submit_chunk() {
     job_id="$(
       sbatch --parsable \
         --dependency="afterany:${dependency}" \
-        --export=ALL,TASK_OFFSET="${offset}" \
+        --export=ALL,TASK_OFFSET="${offset}",OUTPUT_ROOT="${OUTPUT_ROOT}" \
         --array="${array_spec}%${CONCURRENCY}" \
         "${JOB_SCRIPT}"
     )"
   else
     job_id="$(
       sbatch --parsable \
-        --export=ALL,TASK_OFFSET="${offset}" \
+        --export=ALL,TASK_OFFSET="${offset}",OUTPUT_ROOT="${OUTPUT_ROOT}" \
         --array="${array_spec}%${CONCURRENCY}" \
         "${JOB_SCRIPT}"
     )"
@@ -39,7 +40,13 @@ submit_chunk() {
   echo "${job_id}"
 }
 
+mkdir -p "${OUTPUT_ROOT}"
+python run_hcs_ng_realization.py \
+  --output-root "${OUTPUT_ROOT}" \
+  --write-manifest-only
+
 echo "Submitting HCS NG campaign with CONCURRENCY=${CONCURRENCY}"
+echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
 
 job0="$(submit_chunk 0 0-999)"
 echo "chunk offset=0    job=${job0}"

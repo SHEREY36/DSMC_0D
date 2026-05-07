@@ -47,6 +47,7 @@ base_config:
   diagnostics:
     non_gaussian:
       enabled: true
+      write_progress: false
 
 hcs_ng_sweep:
   AR: 2.0

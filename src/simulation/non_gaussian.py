@@ -23,7 +23,10 @@ DEFAULT_NON_GAUSSIAN_CONFIG = {
     "hist_energy_coupling_range": [0.0, 64.0],
     "write_time_series": True,
     "write_histograms": True,
+    "write_progress": False,
 }
+
+OUTPUT_BUFFER_SIZE = 65536
 
 
 def get_non_gaussian_config(config):
@@ -198,7 +201,7 @@ class NonGaussianDiagnostics:
 
         if self.cfg["write_time_series"]:
             self.moment_file = open(self._derived_path("_ng_moments.txt"), "w",
-                                    buffering=1)
+                                    buffering=OUTPUT_BUFFER_SIZE)
             self.moment_file.write(
                 "# t tau Ttrans Trot theta a2_tr a3_tr a2_rot a11 "
                 "c2 c4 c6 w2 w4 c2w2 sample_index n_samples_particles\n"
@@ -274,7 +277,6 @@ class NonGaussianDiagnostics:
                 f"{w4:13.8f} {c2w2:13.8f} {self.sample_count:d} "
                 f"{self.particle_sample_count:d}\n"
             )
-            self.moment_file.flush()
 
         if self.cfg["write_histograms"]:
             c_mag = np.sqrt(c2)
@@ -298,7 +300,8 @@ class NonGaussianDiagnostics:
         else:
             while self.next_sample_tau <= tau + tol:
                 self.next_sample_tau += self.sample_delta_tau
-        self._write_progress(t, tau, Ttrans, Trot)
+        if self.cfg["write_progress"]:
+            self._write_progress(t, tau, Ttrans, Trot)
         return True
 
     def _write_progress(self, t, tau, Ttrans, Trot):

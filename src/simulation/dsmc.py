@@ -13,6 +13,9 @@ from .vss_rank2 import sample_vss_chi
 from src.preprocessing.relaxation import prepare_theta, Zr
 
 
+OUTPUT_BUFFER_SIZE = 65536
+
+
 def _chi_hs(mu, alpha):
     """Hard-sphere scattering angle chi_hs(mu, alpha).
 
@@ -255,10 +258,12 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     try:
         pressure_context = (
-            open(pressure_path, 'w', buffering=1)
+            open(pressure_path, 'w', buffering=OUTPUT_BUFFER_SIZE)
             if write_pressure else nullcontext(None)
         )
-        with open(output_path, 'w', buffering=1) as file, pressure_context as pfile:
+        with open(
+            output_path, 'w', buffering=OUTPUT_BUFFER_SIZE
+        ) as file, pressure_context as pfile:
             while (
                 t < t_end
                 and (

@@ -6,6 +6,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=48:00:00
+#SBATCH --signal=B:TERM@120
 #SBATCH -J hcs_ng_paper
 #SBATCH --array=0-999%64
 #SBATCH -o logs/hcs_ng_%A_%a.out
@@ -51,8 +52,21 @@ set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR}"
 CONFIG="${CONFIG:-config/default.yaml}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-runs/hcs_ng_long_window}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${RCAC_SCRATCH:-${SCRATCH:-runs}}/hcs_ng_long_window}"
 mkdir -p logs "${OUTPUT_ROOT}"
+
+if [[ -n "${TMPDIR:-}" && -d "${TMPDIR}" ]]; then
+  LOCAL_WORKDIR="${LOCAL_WORKDIR:-${TMPDIR}/hcs_ng_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}}"
+else
+  LOCAL_WORKDIR="${LOCAL_WORKDIR:-/tmp/${USER}_hcs_ng_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}}"
+fi
+mkdir -p "${LOCAL_WORKDIR}"
+cleanup_local_workdir() {
+  if [[ -n "${LOCAL_WORKDIR}" && "${LOCAL_WORKDIR}" != "/" ]]; then
+    rm -rf -- "${LOCAL_WORKDIR}"
+  fi
+}
+trap cleanup_local_workdir EXIT
 
 # Prevent thread oversubscription inside each one-core realization.
 export OMP_NUM_THREADS=1
@@ -147,4 +161,6 @@ python run_hcs_ng_realization.py \
   --seed "${SEED}" \
   --realization-index "${REALIZATION_INDEX}" \
   --output-root "${OUTPUT_ROOT}" \
+  --local-workdir "${LOCAL_WORKDIR}" \
+  --skip-manifest \
   "${EXTRA_ARGS[@]}"
