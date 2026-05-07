@@ -4,7 +4,7 @@
 #SBATCH -N 1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=4G
+#SBATCH --mem=8G
 #SBATCH --time=48:00:00
 #SBATCH --signal=B:TERM@120
 #SBATCH -J hcs_ng_paper
@@ -73,6 +73,9 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export MALLOC_ARENA_MAX=2
+export MALLOC_TRIM_THRESHOLD_=131072
+export PYTHONUNBUFFERED=1
 
 # ---- Python environment bootstrap (Conda on Negishi) ----
 CONDA_BASE="/apps/external/apps/conda/2025.09"
@@ -153,8 +156,11 @@ fi
 if [[ "${HCS_RESCALE_OVERRIDE:-1}" == "0" ]]; then
   EXTRA_ARGS+=(--no-hcs-rescale)
 fi
+if [[ -n "${MEMORY_DIAGNOSTICS_INTERVAL_STEPS:-}" ]]; then
+  EXTRA_ARGS+=(--memory-diagnostics-interval-steps "${MEMORY_DIAGNOSTICS_INTERVAL_STEPS}")
+fi
 
-python run_hcs_ng_realization.py \
+python -u run_hcs_ng_realization.py \
   --config "${CONFIG}" \
   --AR "${AR}" \
   --alpha "${ALPHA}" \

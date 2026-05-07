@@ -101,6 +101,14 @@ class NonGaussianDiagnostics:
         self.final_NColl = 0
         self.moment_file = None
         sim_cfg = config.get("simulation", {})
+        self.output_buffer_size = int(
+            sim_cfg.get("output_buffer_size", OUTPUT_BUFFER_SIZE)
+        )
+        if self.output_buffer_size == 0 or self.output_buffer_size < -1:
+            raise ValueError(
+                "simulation.output_buffer_size must be -1, 1, or a positive "
+                f"integer, got {self.output_buffer_size}"
+            )
         self.hcs_rescale_enabled = bool(
             sim_cfg.get("hcs_rescale_temperature", False)
         )
@@ -201,7 +209,7 @@ class NonGaussianDiagnostics:
 
         if self.cfg["write_time_series"]:
             self.moment_file = open(self._derived_path("_ng_moments.txt"), "w",
-                                    buffering=OUTPUT_BUFFER_SIZE)
+                                    buffering=self.output_buffer_size)
             self.moment_file.write(
                 "# t tau Ttrans Trot theta a2_tr a3_tr a2_rot a11 "
                 "c2 c4 c6 w2 w4 c2w2 sample_index n_samples_particles\n"

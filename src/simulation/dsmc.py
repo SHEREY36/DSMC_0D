@@ -1,5 +1,6 @@
 import os
 import math
+import ctypes
 from contextlib import nullcontext
 
 import numpy as np
@@ -14,6 +15,125 @@ from src.preprocessing.relaxation import prepare_theta, Zr
 
 
 OUTPUT_BUFFER_SIZE = 65536
+_LIBC = None
+_LIBC_LOADED = False
+
+
+class _NTCWorkspace:
+    """Reusable buffers for vectorized NTC candidate screening."""
+
+    def __init__(self, capacity, seed):
+        self.rng = np.random.default_rng(int(seed) + 0x9E3779B97F4A7C15)
+        self.capacity = 0
+        self.p1 = None
+        self.p2 = None
+        self.rand = None
+        self.eij = None
+        self.v1 = None
+        self.v2 = None
+        self.vrel = None
+        self.prod = None
+        self.cr = None
+        self.abs_cr = None
+        self.norm = None
+        self.mask = None
+        self.ensure_capacity(capacity)
+
+    def ensure_capacity(self, n):
+        n = int(max(1, n))
+        if n <= self.capacity:
+            return
+        capacity = max(n, 2 * self.capacity if self.capacity else 1024)
+        self.capacity = capacity
+        self.p1 = np.empty(capacity, dtype=np.int64)
+        self.p2 = np.empty(capacity, dtype=np.int64)
+        self.rand = np.empty(capacity, dtype=np.float64)
+        self.eij = np.empty((capacity, 3), dtype=np.float64)
+        self.v1 = np.empty((capacity, 3), dtype=np.float64)
+        self.v2 = np.empty((capacity, 3), dtype=np.float64)
+        self.vrel = np.empty((capacity, 3), dtype=np.float64)
+        self.prod = np.empty((capacity, 3), dtype=np.float64)
+        self.cr = np.empty(capacity, dtype=np.float64)
+        self.abs_cr = np.empty(capacity, dtype=np.float64)
+        self.norm = np.empty(capacity, dtype=np.float64)
+        self.mask = np.empty(capacity, dtype=bool)
+
+    def fill_particle_indices(self, Np, n):
+        self.rng.random(n, out=self.rand[:n])
+        np.multiply(self.rand[:n], float(Np), out=self.rand[:n])
+        np.floor(self.rand[:n], out=self.rand[:n])
+        self.p1[:n] = self.rand[:n]
+
+        self.rng.random(n, out=self.rand[:n])
+        np.multiply(self.rand[:n], float(Np), out=self.rand[:n])
+        np.floor(self.rand[:n], out=self.rand[:n])
+        self.p2[:n] = self.rand[:n]
+
+        np.equal(self.p2[:n], self.p1[:n], out=self.mask[:n])
+        same_idx = np.nonzero(self.mask[:n])[0]
+        if same_idx.size:
+            self.p2[same_idx] = (self.p2[same_idx] + 1) % Np
+
+    def screen_candidates(self, vel, Np, n, vrmax):
+        self.ensure_capacity(n)
+        self.fill_particle_indices(Np, n)
+
+        self.rng.standard_normal(size=(n, 3), out=self.eij[:n])
+        np.multiply(self.eij[:n], self.eij[:n], out=self.prod[:n])
+        np.sum(self.prod[:n], axis=1, out=self.norm[:n])
+        np.sqrt(self.norm[:n], out=self.norm[:n])
+        np.maximum(self.norm[:n], 1.0e-30, out=self.norm[:n])
+        np.divide(self.eij[:n], self.norm[:n, None], out=self.eij[:n])
+
+        np.take(vel, self.p1[:n], axis=0, out=self.v1[:n])
+        np.take(vel, self.p2[:n], axis=0, out=self.v2[:n])
+        np.subtract(self.v1[:n], self.v2[:n], out=self.vrel[:n])
+        np.multiply(self.eij[:n], self.vrel[:n], out=self.prod[:n])
+        np.sum(self.prod[:n], axis=1, out=self.cr[:n])
+        np.abs(self.cr[:n], out=self.abs_cr[:n])
+
+        vrmax_temp = float(np.max(self.abs_cr[:n]))
+        self.rng.random(n, out=self.rand[:n])
+        np.multiply(self.rand[:n], vrmax, out=self.rand[:n])
+        np.greater_equal(self.abs_cr[:n], self.rand[:n], out=self.mask[:n])
+        return vrmax_temp, np.nonzero(self.mask[:n])[0]
+
+
+def _load_libc():
+    global _LIBC, _LIBC_LOADED
+    if not _LIBC_LOADED:
+        _LIBC_LOADED = True
+        try:
+            _LIBC = ctypes.CDLL(None)
+        except Exception:
+            _LIBC = None
+    return _LIBC
+
+
+def _malloc_trim():
+    libc = _load_libc()
+    if libc is None or not hasattr(libc, "malloc_trim"):
+        return False
+    try:
+        libc.malloc_trim(0)
+    except Exception:
+        return False
+    return True
+
+
+def _read_proc_memory_kb():
+    values = {}
+    try:
+        with open("/proc/self/status", "r") as f:
+            for line in f:
+                if line.startswith(("VmRSS:", "VmHWM:")):
+                    key, rest = line.split(":", 1)
+                    parts = rest.strip().split()
+                    if parts:
+                        values[key] = int(parts[0])
+    except OSError:
+        pass
+    return values
 
 
 def _chi_hs(mu, alpha):
@@ -77,6 +197,12 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         raise ValueError(
             "simulation.angular_transport_model must be 'current', "
             f"'stress_weight', or 'vss_rank2', got {angular_transport_model!r}"
+        )
+    output_buffer_size = int(sim_cfg.get('output_buffer_size', OUTPUT_BUFFER_SIZE))
+    if output_buffer_size == 0 or output_buffer_size < -1:
+        raise ValueError(
+            "simulation.output_buffer_size must be -1, 1, or a positive integer, "
+            f"got {output_buffer_size}"
         )
     angular_probability_override = sim_cfg.get(
         'angular_transport_probability_override'
@@ -170,6 +296,14 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         )
     if hcs_rescale_temperature and flow_mode != 'hcs':
         raise ValueError("HCS temperature rescaling is only valid for flow.mode='hcs'")
+    hcs_rescale_vrmax_policy = sim_cfg.get(
+        'hcs_rescale_vrmax_policy', 'reset'
+    )
+    if hcs_rescale_vrmax_policy not in ('reset', 'scale'):
+        raise ValueError(
+            "simulation.hcs_rescale_vrmax_policy must be 'reset' or 'scale', "
+            f"got {hcs_rescale_vrmax_policy!r}"
+        )
 
     # Time parameters
     dt = config['time']['dt']
@@ -186,6 +320,23 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         raise ValueError(
             f"time.equilibration_time must be >= 0, got {equilibration_time}"
         )
+    malloc_trim_interval_steps = int(
+        sim_cfg.get('malloc_trim_interval_steps', 0) or 0
+    )
+    if malloc_trim_interval_steps < 0:
+        raise ValueError(
+            "simulation.malloc_trim_interval_steps must be >= 0, "
+            f"got {malloc_trim_interval_steps}"
+        )
+    mem_diag_cfg = sim_cfg.get('memory_diagnostics', {}) or {}
+    mem_diag_enabled = bool(mem_diag_cfg.get('enabled', False))
+    mem_diag_interval_steps = int(mem_diag_cfg.get('interval_steps', 0) or 0)
+    if mem_diag_interval_steps < 0:
+        raise ValueError(
+            "simulation.memory_diagnostics.interval_steps must be >= 0, "
+            f"got {mem_diag_interval_steps}"
+        )
+    mem_diag_on_output = bool(mem_diag_cfg.get('print_on_output', True))
 
     # Initialize particles
     vel, omega, Er = initialize_particles(Np, kTt, kTr, params.mass, params.mI)
@@ -230,9 +381,29 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     NColl = 0
     t = 0.0
     Ntau = 0
+    step_count = 0
+    last_n_cands = 0
+    last_n_accepted = 0
     write_pressure = flow_mode == 'usf'
     pij_c_acc = np.zeros((3, 3)) if write_pressure else None
     t_last_output = 0.0
+    ntc_workspace = _NTCWorkspace(capacity=1024, seed=seed)
+
+    def _print_memory_diag(reason, n_cands, n_accepted):
+        memory = _read_proc_memory_kb()
+        rss_kb = memory.get("VmRSS")
+        hwm_kb = memory.get("VmHWM")
+        if rss_kb is None and hwm_kb is None:
+            return
+        tau_now = NColl / float(Np)
+        rss_str = f"{rss_kb / 1024.0:.1f}MiB" if rss_kb is not None else "n/a"
+        hwm_str = f"{hwm_kb / 1024.0:.1f}MiB" if hwm_kb is not None else "n/a"
+        print(
+            f"  mem[{reason}] step={step_count} t={t:.3f} tau={tau_now:.3f} "
+            f"NColl={NColl} n_cands={n_cands} accepted={n_accepted} "
+            f"rss={rss_str} maxrss={hwm_str}",
+            flush=True,
+        )
 
     flow_str = f"flow={flow_mode}" + (f", gdot={gdot:.4f}" if flow_mode == 'usf' else "")
     if sphere_mode:
@@ -258,11 +429,11 @@ def run_simulation(config, models, seed, output_path, pressure_path):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     try:
         pressure_context = (
-            open(pressure_path, 'w', buffering=OUTPUT_BUFFER_SIZE)
+            open(pressure_path, 'w', buffering=output_buffer_size)
             if write_pressure else nullcontext(None)
         )
         with open(
-            output_path, 'w', buffering=OUTPUT_BUFFER_SIZE
+            output_path, 'w', buffering=output_buffer_size
         ) as file, pressure_context as pfile:
             while (
                 t < t_end
@@ -285,6 +456,10 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     )
 
                     ng_diag.maybe_sample(t, tau, Ntau, vel, Er, Eksum, Ersum)
+                    if mem_diag_enabled and mem_diag_on_output:
+                        _print_memory_diag(
+                            "output", last_n_cands, last_n_accepted
+                        )
 
                     # Pressure tensor output
                     if write_pressure:
@@ -319,31 +494,20 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                 _ntc_mean = (2.0 * float(Np) * float(Np - 1)
                              * params.sigma_c * vrmax * ovol * halfdt)
                 n_cands = int(np.floor(_ntc_mean + np.random.rand()))
+                last_n_cands = n_cands
+                last_n_accepted = 0
                 vrmax_temp = 0.0
 
                 if n_cands > 0:
-                    p1s = np.random.randint(0, Np, n_cands)
-                    p2s = np.random.randint(0, Np, n_cands)
-                    same = p2s == p1s
-                    p2s[same] = (p2s[same] + 1) % Np
-
-                    eijs_batch = np.random.randn(n_cands, 3)
-                    eijs_batch /= np.maximum(
-                        np.linalg.norm(eijs_batch, axis=1, keepdims=True), 1e-30
+                    vrmax_temp, accepted_idx = ntc_workspace.screen_candidates(
+                        vel, Np, n_cands, vrmax
                     )
-
-                    vrels_batch = vel[p1s] - vel[p2s]
-                    CRs_batch = np.einsum('ij,ij->i', eijs_batch, vrels_batch)
-                    abs_CRs = np.abs(CRs_batch)
-
-                    vrmax_temp = float(np.max(abs_CRs))
-                    accept_mask = abs_CRs >= vrmax * np.random.rand(n_cands)
-                    accepted_idx = np.where(accept_mask)[0]
+                    last_n_accepted = int(accepted_idx.size)
 
                     for k in accepted_idx:
-                        p1 = int(p1s[k])
-                        p2 = int(p2s[k])
-                        eij = eijs_batch[k].copy()
+                        p1 = int(ntc_workspace.p1[k])
+                        p2 = int(ntc_workspace.p2[k])
+                        eij = ntc_workspace.eij[k].copy()
 
                         # Re-fetch to capture updates from earlier collisions this step
                         v1 = vel[p1].copy()
@@ -523,9 +687,35 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                     vrmax = vrmax_temp
 
                 if hcs_rescale_temperature:
-                    vrmax *= _rescale_hcs_state()
+                    hcs_scale = _rescale_hcs_state()
+                    if hcs_rescale_vrmax_policy == 'scale':
+                        vrmax *= hcs_scale
+                    else:
+                        Ttrans_after = (
+                            params.mass * np.sum(np.sum(vel**2, axis=1))
+                            / (3.0 * Np)
+                        )
+                        thermal_vrmax = (
+                            5.0 * np.sqrt(2.0)
+                            * np.sqrt(max(Ttrans_after, 1.0e-30) * params.omass)
+                        )
+                        vrmax = max(thermal_vrmax, vrmax_temp * hcs_scale)
 
                 t += dt
+                step_count += 1
+                if (
+                    malloc_trim_interval_steps > 0
+                    and step_count % malloc_trim_interval_steps == 0
+                ):
+                    _malloc_trim()
+                if (
+                    mem_diag_enabled
+                    and mem_diag_interval_steps > 0
+                    and step_count % mem_diag_interval_steps == 0
+                ):
+                    _print_memory_diag(
+                        "step", last_n_cands, last_n_accepted
+                    )
     finally:
         ng_diag.close(NColl, NColl / float(Np), final_t=t)
 
