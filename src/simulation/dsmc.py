@@ -308,184 +308,195 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                 Trot = np.sum(Er) / float(Np)
                 temp_ratio = Ttrans / Trot if Trot > 0.0 else 1.0
 
-                # NTC collision selection
-                totalSel = (2.0 * float(Np) * float(Np - 1)
-                            * params.sigma_c * vrmax * ovol * halfdt)
-                RR = np.random.rand()
-                totalSel = np.floor(totalSel + RR)
+                # NTC collision selection — batch all candidates at once.
+                # Rejection screening is vectorized; only the ~16% accepted pairs
+                # go through the full per-collision Python path.
+                _ntc_mean = (2.0 * float(Np) * float(Np - 1)
+                             * params.sigma_c * vrmax * ovol * halfdt)
+                n_cands = int(np.floor(_ntc_mean + np.random.rand()))
                 vrmax_temp = 0.0
 
-                while totalSel > 0:
-                    totalSel -= 1
+                if n_cands > 0:
+                    p1s = np.random.randint(0, Np, n_cands)
+                    p2s = np.random.randint(0, Np, n_cands)
+                    same = p2s == p1s
+                    p2s[same] = (p2s[same] + 1) % Np
 
-                    p1 = np.random.randint(0, Np)
-                    p2 = p1
-                    while p2 == p1:
-                        p2 = np.random.randint(0, Np)
+                    eijs_batch = np.random.randn(n_cands, 3)
+                    eijs_batch /= np.maximum(
+                        np.linalg.norm(eijs_batch, axis=1, keepdims=True), 1e-30
+                    )
 
-                    v1 = vel[p1, :]
-                    v2 = vel[p2, :]
-                    vrel_vec = v1 - v2
+                    vrels_batch = vel[p1s] - vel[p2s]
+                    CRs_batch = np.einsum('ij,ij->i', eijs_batch, vrels_batch)
+                    abs_CRs = np.abs(CRs_batch)
 
-                    if sphere_mode:
-                        # Hard-sphere NTC: accept on |eij · g| (cosine-weighted).
-                        eij = np.random.randn(3)
-                        eij /= np.linalg.norm(eij)
-                        CR = np.dot(eij, vrel_vec)
-                        abs_CR = abs(CR)
+                    vrmax_temp = float(np.max(abs_CRs))
+                    accept_mask = abs_CRs >= vrmax * np.random.rand(n_cands)
+                    accepted_idx = np.where(accept_mask)[0]
 
-                        if abs_CR >= vrmax_temp:
-                            vrmax_temp = abs_CR
-                        if abs_CR < vrmax * np.random.random():
-                            continue
+                    for k in accepted_idx:
+                        p1 = int(p1s[k])
+                        p2 = int(p2s[k])
+                        eij = eijs_batch[k].copy()
+
+                        # Re-fetch to capture updates from earlier collisions this step
+                        v1 = vel[p1].copy()
+                        v2 = vel[p2].copy()
+                        vrel_vec = v1 - v2
+
+                        CR = float(np.dot(eij, vrel_vec))
                         if CR < 0:
                             eij = -eij
                             CR = -CR
+                        vr = float(np.linalg.norm(vrel_vec))
 
-                        NColl += 2
-                        COR_PP = (alpha + 1.0) * 0.5
-                        vel[p1, :] = v1 - COR_PP * CR * eij
-                        vel[p2, :] = v2 + COR_PP * CR * eij
-                        vr = np.linalg.norm(vrel_vec)
-                        if write_pressure:
-                            accumulate_pij_c(
-                                pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
-                                eij_override=eij
-                            )
-
-                    else:
-                        # Spherocylinder NTC: draw eij isotropically, accept on |eij · g|.
-                        eij = np.random.randn(3)
-                        eij /= np.linalg.norm(eij)
-                        CR = np.dot(eij, vrel_vec)
-                        abs_CR = abs(CR)
-
-                        if abs_CR >= vrmax_temp:
-                            vrmax_temp = abs_CR
-                        if abs_CR < vrmax * np.random.random():
-                            continue
-                        if CR < 0:
-                            eij = -eij
-
-                        NColl += 2
-                        vr = np.linalg.norm(vrel_vec)
-
-                        vcom = (v1 + v2) * 0.5
-                        v1com = v1 - vcom
-                        v2com = v2 - vcom
-
-                        Etrans_i = 0.5 * params.mass * (
-                            np.dot(v1com, v1com) + np.dot(v2com, v2com)
-                        )
-                        Erot_i = Er[p1] + Er[p2]
-                        Etotal_i = Etrans_i + Erot_i
-
-                        epsilon_tr_i = Etrans_i / Etotal_i
-                        epsilon_rot_1_i = Er[p1] / Erot_i if Erot_i > 0 else 0.5
-
-                        in_equilibration = t < equilibration_time
-
-                        ghat = vrel_vec / max(vr, 1.0e-30)
-                        mu_abs = abs(float(np.dot(eij, ghat)))
-                        _alpha_scat = 1.0 if in_equilibration else alpha
-                        if angular_transport_model == 'vss_rank2':
-                            alpha_eff_scat = (
-                                vss_alpha_eff_elastic
-                                if in_equilibration else vss_alpha_eff
-                            )
-                            chi_rad = sample_vss_chi(alpha_eff_scat)
-                        else:
-                            # Validation showed the stochastic conditional-chi
-                            # Beta model introduces wrong-sign anisotropy artifacts;
-                            # chi_hs paired with the vonMises eps model gives the
-                            # correct directional distribution (see plot_eps_model_tensor.py).
-                            chi_rad = _chi_hs(mu_abs, _alpha_scat)
-
-                        # Rotational relaxation
-                        theta = temp_ratio
-                        Zr_val = Zr(theta, eta=1.0, alpha=alpha)
-                        P_r = min(1.0 / Zr_val, 0.5)
-
-                        relax_p1 = False
-                        relax_p2 = False
-                        Rn = np.random.random()
-                        if Rn < P_r:
-                            relax_p1 = True
-                        elif Rn < 2.0 * P_r:
-                            relax_p2 = True
-
-                        theta2 = prepare_theta(temp_ratio)
-
-                        if relax_p1:
-                            if alpha >= 1.0:
-                                epsilon_tr_f = np.random.beta(2.0, 2.0)
-                                epsilon_rot_1_f = np.random.random()
-                                epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
-                            else:
-                                sample = models.cond_gmm.sample_conditionals(
-                                    r=theta2, e_tr=epsilon_tr_i,
-                                    e_r1=epsilon_rot_1_i, n_samples=1
+                        if sphere_mode:
+                            NColl += 2
+                            COR_PP = (alpha + 1.0) * 0.5
+                            vel[p1, :] = v1 - COR_PP * CR * eij
+                            vel[p2, :] = v2 + COR_PP * CR * eij
+                            if write_pressure:
+                                accumulate_pij_c(
+                                    pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
+                                    eij_override=eij
                                 )
-                                epsilon_tr_f = sample[0, 0]
-                                epsilon_rot_1_f = sample[0, 1]
-                                epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
-                        elif relax_p2:
-                            if alpha >= 1.0:
-                                epsilon_tr_f = np.random.beta(2.0, 2.0)
-                                epsilon_rot_2_f = np.random.random()
-                                epsilon_rot_1_f = 1.0 - epsilon_rot_2_f
-                            else:
-                                sample = models.cond_gmm.sample_conditionals(
-                                    r=theta2, e_tr=epsilon_tr_i,
-                                    e_r1=epsilon_rot_1_i, n_samples=1
+
+                        else:
+                            NColl += 2
+                            vcom = (v1 + v2) * 0.5
+                            v1com = v1 - vcom
+                            v2com = v2 - vcom
+
+                            Etrans_i = 0.5 * params.mass * (
+                                np.dot(v1com, v1com) + np.dot(v2com, v2com)
+                            )
+                            Erot_i = Er[p1] + Er[p2]
+                            Etotal_i = Etrans_i + Erot_i
+
+                            epsilon_tr_i = Etrans_i / Etotal_i
+                            epsilon_rot_1_i = Er[p1] / Erot_i if Erot_i > 0 else 0.5
+
+                            in_equilibration = t < equilibration_time
+
+                            ghat = vrel_vec / max(vr, 1.0e-30)
+                            mu_abs = abs(float(np.dot(eij, ghat)))
+                            _alpha_scat = 1.0 if in_equilibration else alpha
+                            if angular_transport_model == 'vss_rank2':
+                                alpha_eff_scat = (
+                                    vss_alpha_eff_elastic
+                                    if in_equilibration else vss_alpha_eff
                                 )
-                                epsilon_tr_f = sample[0, 0]
-                                epsilon_rot_2_f = sample[0, 1]
-                                epsilon_rot_1_f = 1.0 - epsilon_rot_2_f
-                        else:
-                            epsilon_tr_f = epsilon_tr_i
-                            epsilon_rot_1_f = Er[p1] / Erot_i if Erot_i > 1e-30 else 0.5
-                            epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
+                                chi_rad = sample_vss_chi(alpha_eff_scat)
+                            else:
+                                # Validation showed the stochastic conditional-chi
+                                # Beta model introduces wrong-sign anisotropy artifacts;
+                                # chi_hs paired with the vonMises eps model gives the
+                                # correct directional distribution (see plot_eps_model_tensor.py).
+                                chi_rad = _chi_hs(mu_abs, _alpha_scat)
 
-                        # Dissipation
-                        if in_equilibration or gamma_max <= 0.0:
-                            gamma = 0.0
-                        else:
-                            gamma = sample_dissp(beta_a, beta_b)
-                            gamma = gamma * gamma_max * prob_one_hit
+                            # Rotational relaxation
+                            theta = temp_ratio
+                            Zr_val = Zr(theta, eta=1.0, alpha=alpha)
+                            P_r = min(1.0 / Zr_val, 0.5)
 
-                        _theta = max(temp_ratio, 1e-10)
-                        f_tr = C_alpha * 3.0 * _theta / (3.0 * _theta + 2.0)
+                            relax_p1 = False
+                            relax_p2 = False
+                            Rn = np.random.random()
+                            if Rn < P_r:
+                                relax_p1 = True
+                            elif Rn < 2.0 * P_r:
+                                relax_p2 = True
 
-                        delta_E = gamma * Etotal_i
-                        Etrans_f = epsilon_tr_f * Etotal_i - f_tr * delta_E
-                        Erot_f = ((1.0 - epsilon_tr_f) * Etotal_i
-                                  - (1.0 - f_tr) * delta_E)
+                            theta2 = prepare_theta(temp_ratio)
 
-                        if Etrans_f < 0:
-                            Erot_f += Etrans_f
-                            Etrans_f = 1e-30
-                        if Erot_f < 0:
-                            Etrans_f += Erot_f
-                            Erot_f = 1e-30
+                            if relax_p1:
+                                if alpha >= 1.0:
+                                    epsilon_tr_f = np.random.beta(2.0, 2.0)
+                                    epsilon_rot_1_f = np.random.random()
+                                    epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
+                                else:
+                                    sample = models.cond_gmm.sample_conditionals(
+                                        r=theta2, e_tr=epsilon_tr_i,
+                                        e_r1=epsilon_rot_1_i, n_samples=1
+                                    )
+                                    epsilon_tr_f = sample[0, 0]
+                                    epsilon_rot_1_f = sample[0, 1]
+                                    epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
+                            elif relax_p2:
+                                if alpha >= 1.0:
+                                    epsilon_tr_f = np.random.beta(2.0, 2.0)
+                                    epsilon_rot_2_f = np.random.random()
+                                    epsilon_rot_1_f = 1.0 - epsilon_rot_2_f
+                                else:
+                                    sample = models.cond_gmm.sample_conditionals(
+                                        r=theta2, e_tr=epsilon_tr_i,
+                                        e_r1=epsilon_rot_1_i, n_samples=1
+                                    )
+                                    epsilon_tr_f = sample[0, 0]
+                                    epsilon_rot_2_f = sample[0, 1]
+                                    epsilon_rot_1_f = 1.0 - epsilon_rot_2_f
+                            else:
+                                epsilon_tr_f = epsilon_tr_i
+                                epsilon_rot_1_f = Er[p1] / Erot_i if Erot_i > 1e-30 else 0.5
+                                epsilon_rot_2_f = 1.0 - epsilon_rot_1_f
 
-                        Er[p1] = epsilon_rot_1_f * Erot_f
-                        Er[p2] = epsilon_rot_2_f * Erot_f
+                            # Dissipation
+                            if in_equilibration or gamma_max <= 0.0:
+                                gamma = 0.0
+                            else:
+                                gamma = sample_dissp(beta_a, beta_b)
+                                gamma = gamma * gamma_max * prob_one_hit
 
-                        cr_new = np.sqrt(Etrans_f * params.omass)
-                        cr_new = max(cr_new, 1e-14)
+                            _theta = max(temp_ratio, 1e-10)
+                            f_tr = C_alpha * 3.0 * _theta / (3.0 * _theta + 2.0)
 
-                        # Scatter g' using azimuthal angle eps around ghat.
-                        # eps=0 → in-plane with eij (hard-sphere limit).
-                        # use_isotropic_eps → eps ~ Uniform(0,2pi) (orientation-
-                        #   averaged result for smooth spherocylinders).
-                        # has_eps_model → eps ~ vonMises(0, kappa(mu,alpha,AR)).
-                        # The p_eta mixture keeps the scalar energy model
-                        # unchanged and thins only the angular direction update.
-                        gpost_mag = 2.0 * cr_new
-                        if angular_transport_model == 'stress_weight':
-                            p_eta_scat = p_eta_elastic if in_equilibration else p_eta
-                            if np.random.random() < p_eta_scat:
+                            delta_E = gamma * Etotal_i
+                            Etrans_f = epsilon_tr_f * Etotal_i - f_tr * delta_E
+                            Erot_f = ((1.0 - epsilon_tr_f) * Etotal_i
+                                      - (1.0 - f_tr) * delta_E)
+
+                            if Etrans_f < 0:
+                                Erot_f += Etrans_f
+                                Etrans_f = 1e-30
+                            if Erot_f < 0:
+                                Etrans_f += Erot_f
+                                Erot_f = 1e-30
+
+                            Er[p1] = epsilon_rot_1_f * Erot_f
+                            Er[p2] = epsilon_rot_2_f * Erot_f
+
+                            cr_new = np.sqrt(Etrans_f * params.omass)
+                            cr_new = max(cr_new, 1e-14)
+
+                            # Scatter g' using azimuthal angle eps around ghat.
+                            # eps=0 → in-plane with eij (hard-sphere limit).
+                            # use_isotropic_eps → eps ~ Uniform(0,2pi) (orientation-
+                            #   averaged result for smooth spherocylinders).
+                            # has_eps_model → eps ~ vonMises(0, kappa(mu,alpha,AR)).
+                            # The p_eta mixture keeps the scalar energy model
+                            # unchanged and thins only the angular direction update.
+                            gpost_mag = 2.0 * cr_new
+                            if angular_transport_model == 'stress_weight':
+                                p_eta_scat = p_eta_elastic if in_equilibration else p_eta
+                                if np.random.random() < p_eta_scat:
+                                    if use_isotropic_eps:
+                                        eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
+                                    elif models.has_eps_model:
+                                        eps_rad = models.sample_eps(mu_abs, _alpha_scat, params.AR)
+                                    else:
+                                        eps_rad = 0.0
+                                    gpost = mu_plane_post_relative_with_eps(
+                                        vrel_vec, eij, chi_rad, gpost_mag, eps_rad
+                                    )
+                                else:
+                                    gpost = gpost_mag * ghat
+                            elif angular_transport_model == 'vss_rank2':
+                                eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
+                                gpost = mu_plane_post_relative_with_eps(
+                                    vrel_vec, eij, chi_rad, gpost_mag, eps_rad
+                                )
+                            else:
                                 if use_isotropic_eps:
                                     eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
                                 elif models.has_eps_model:
@@ -495,30 +506,13 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                                 gpost = mu_plane_post_relative_with_eps(
                                     vrel_vec, eij, chi_rad, gpost_mag, eps_rad
                                 )
-                            else:
-                                gpost = gpost_mag * ghat
-                        elif angular_transport_model == 'vss_rank2':
-                            eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
-                            gpost = mu_plane_post_relative_with_eps(
-                                vrel_vec, eij, chi_rad, gpost_mag, eps_rad
-                            )
-                        else:
-                            if use_isotropic_eps:
-                                eps_rad = np.random.uniform(0.0, 2.0 * np.pi)
-                            elif models.has_eps_model:
-                                eps_rad = models.sample_eps(mu_abs, _alpha_scat, params.AR)
-                            else:
-                                eps_rad = 0.0
-                            gpost = mu_plane_post_relative_with_eps(
-                                vrel_vec, eij, chi_rad, gpost_mag, eps_rad
-                            )
-                        vel[p1, :] = vcom + 0.5 * gpost
-                        vel[p2, :] = vcom - 0.5 * gpost
-                        if write_pressure:
-                            accumulate_pij_c(
-                                pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
-                                eij_override=eij
-                            )
+                            vel[p1, :] = vcom + 0.5 * gpost
+                            vel[p2, :] = vcom - 0.5 * gpost
+                            if write_pressure:
+                                accumulate_pij_c(
+                                    pij_c_acc, v1, v2, vel[p1, :], params.mass, vr,
+                                    eij_override=eij
+                                )
 
                 if vrmax < vrmax_temp:
                     vrmax = vrmax_temp

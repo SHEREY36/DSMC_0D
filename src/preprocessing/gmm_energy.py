@@ -158,6 +158,7 @@ class ConditionalGMM:
         self.D_y = D_y
         self._log_weights = np.log(self.weights + 1e-300)
         self._const = -0.5 * D_x * np.log(2 * np.pi)
+        self.mu_x = self.means[:, :D_x]   # cached view (M, D_x)
 
     def _scale_x(self, r, e_tr, e_r1, eps=1e-8):
         """Transform (r, e_tr, e_r1) to scaled space."""
@@ -181,17 +182,11 @@ class ConditionalGMM:
 
     def _sample_one(self, x_scaled):
         """Draw one sample from p(y | x) using pre-computed arrays."""
-        mu_x = self.means[:, :self.D_x]  # (M, D_x)
-
-        # Compute log-responsibilities for each component
-        log_resp = np.empty(self.M)
-        for m in range(self.M):
-            diff = x_scaled - mu_x[m]
-            mahal = diff @ self.inv_xx[m] @ diff
-            log_resp[m] = (self._log_weights[m]
-                           + self._const
-                           - 0.5 * self.logdet_xx[m]
-                           - 0.5 * mahal)
+        # Vectorized Mahalanobis distances over all M components at once
+        diff = x_scaled - self.mu_x                                      # (M, D_x)
+        mahal = np.einsum('mi,mij,mj->m', diff, self.inv_xx, diff)      # (M,)
+        log_resp = (self._log_weights + self._const
+                    - 0.5 * self.logdet_xx - 0.5 * mahal)               # (M,)
 
         # Normalize via log-sum-exp
         max_lr = np.max(log_resp)
@@ -207,7 +202,7 @@ class ConditionalGMM:
         m = np.random.choice(self.M, p=resp)
 
         # Conditional mean: mu_y_m + A_m @ (x_scaled - mu_x_m)
-        mu_cond = self.mu_y[m] + self.A[m] @ (x_scaled - mu_x[m])
+        mu_cond = self.mu_y[m] + self.A[m] @ (x_scaled - self.mu_x[m])
 
         # Sample: y = mu_cond + L_m @ z,  z ~ N(0, I)
         z = np.random.randn(self.D_y)

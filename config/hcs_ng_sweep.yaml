@@ -3,7 +3,7 @@ base_config:
     AR: 2.0
     radius: 0.5
     mass: 1.0
-    sigma_c_scale: 1.0
+    sigma_c_scale: 1.020
 
   system:
     kTt: 1.0
@@ -37,6 +37,9 @@ base_config:
   preprocessing:
     model_output_dir: models/
     gmm: {}
+    dissipation:
+      beta_a: 1.21
+      beta_b: 3.67
     ftr: {}
 
   calibration: {}

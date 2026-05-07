@@ -125,6 +125,14 @@ def write_manifest(tasks, output_root):
     return path
 
 
+_worker_models = None
+
+
+def _worker_init(config_for_models):
+    global _worker_models
+    _worker_models = load_models(config_for_models)
+
+
 def _run_task(task):
     config = task["config"]
     output_dir = Path(task["output_dir"])
@@ -133,7 +141,7 @@ def _run_task(task):
         f"  [AR={task['AR']:g} alpha={task['alpha']:.2f} "
         f"R{task['realization_index']} seed={task['seed']}] starting..."
     )
-    models = load_models(config)
+    models = _worker_models if _worker_models is not None else load_models(config)
     run_simulation(
         config, models, task["seed"], task["output_path"], task["pressure_path"]
     )
@@ -143,10 +151,15 @@ def _run_task(task):
 def run_tasks(tasks, workers):
     workers = max(1, int(workers))
     if workers == 1:
+        _worker_init(tasks[0]["config"])
         return [_run_task(task) for task in tasks]
 
     completed = []
-    with ProcessPoolExecutor(max_workers=workers) as executor:
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=_worker_init,
+        initargs=(tasks[0]["config"],),
+    ) as executor:
         futures = {executor.submit(_run_task, task): task for task in tasks}
         for future in as_completed(futures):
             completed.append(future.result())
