@@ -301,7 +301,8 @@ def main():
 
     ensure_manifest(args.output_root)
     with open(args.config, "r") as f:
-        base_config = yaml.safe_load(f)
+        _raw = yaml.safe_load(f)
+    base_config = _raw["base_config"] if "base_config" in _raw else _raw
     domain = None
     if args.domain:
         domain = [float(x.strip()) for x in args.domain.split(",") if x.strip()]
