@@ -12,6 +12,7 @@ Usage (from project root):
 from __future__ import annotations
 
 import argparse
+import csv
 import math
 import sys
 from itertools import groupby
@@ -29,7 +30,10 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.postprocessing.analysis import load_dsmc_results, load_pressure_results
-from src.simulation.particle import compute_particle_params
+from src.simulation.particle import compute_particle_params, result_ar_tag
+
+
+SPHCYL_LABEL = "AR=2"
 
 
 # ---------------------------------------------------------------------------
@@ -167,13 +171,21 @@ def load_dsmc_case(case_dir: Path) -> dict | None:
     diag_t, diag_T, diag_theta = [], [], []
     diag_stats_start, diag_plateau_start = [], []
 
-    ar_tag = int(round(params.AR))
+    ar_tags = [result_ar_tag(params.AR), f"AR{int(round(params.AR))}"]
+    ar_tags = list(dict.fromkeys(ar_tags))
     n_seeds = len(cfg.get("simulation", {}).get("seeds", [None] * 4))
     for ri in range(1, n_seeds + 1):
-        tp = results_dir / f"AR{ar_tag}_COR{tag}_USF_R{ri}.txt"
-        pp = results_dir / f"AR{ar_tag}_COR{tag}_USF_R{ri}_pressure.txt"
-        if not (tp.exists() and pp.exists()):
+        paths = [
+            (
+                results_dir / f"{ar_tag}_COR{tag}_USF_R{ri}.txt",
+                results_dir / f"{ar_tag}_COR{tag}_USF_R{ri}_pressure.txt",
+            )
+            for ar_tag in ar_tags
+        ]
+        existing = [(tp, pp) for tp, pp in paths if tp.exists() and pp.exists()]
+        if not existing:
             continue
+        tp, pp = existing[0]
         try:
             t, _, T_tr, T_rot, T_tot = load_dsmc_results(str(tp))
             pres = load_pressure_results(str(pp))
@@ -250,6 +262,46 @@ def load_all_dsmc(sweep_dir: Path) -> list[dict]:
             cases.append(c)
     cases.sort(key=lambda x: x["alpha"])
     return cases
+
+
+def write_dsmc_lammps_summary(dsmc_cases, lmp_sphcyl, out_path: Path):
+    """Write compact steady-state DSMC/LAMMPS summary for visual calibration."""
+    lmp_by_alpha = {round(row["e"], 3): row for row in lmp_sphcyl}
+    fields = [
+        "alpha", "gdot", "a_star", "n_seeds",
+        "Pxx_DSMC", "Pxx_DSMC_std", "Pxx_LAMMPS",
+        "Pyy_DSMC", "Pyy_DSMC_std", "Pyy_LAMMPS",
+        "Pzz_DSMC", "Pzz_DSMC_std", "Pzz_LAMMPS",
+        "Pxy_DSMC", "Pxy_DSMC_std", "Pxy_LAMMPS",
+        "theta_DSMC", "theta_DSMC_std", "theta_LAMMPS",
+    ]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for case in dsmc_cases:
+            lmp = lmp_by_alpha.get(round(case["alpha"], 3), {})
+            writer.writerow({
+                "alpha": f"{case['alpha']:.3f}",
+                "gdot": case.get("gdot", ""),
+                "a_star": case.get("a_star", ""),
+                "n_seeds": case.get("n_seeds", ""),
+                "Pxx_DSMC": case.get("Pxx_mean", ""),
+                "Pxx_DSMC_std": case.get("Pxx_std", ""),
+                "Pxx_LAMMPS": lmp.get("Pxx", ""),
+                "Pyy_DSMC": case.get("Pyy_mean", ""),
+                "Pyy_DSMC_std": case.get("Pyy_std", ""),
+                "Pyy_LAMMPS": lmp.get("Pyy", ""),
+                "Pzz_DSMC": case.get("Pzz_mean", ""),
+                "Pzz_DSMC_std": case.get("Pzz_std", ""),
+                "Pzz_LAMMPS": lmp.get("Pzz", ""),
+                "Pxy_DSMC": case.get("Pxy_mean", ""),
+                "Pxy_DSMC_std": case.get("Pxy_std", ""),
+                "Pxy_LAMMPS": lmp.get("Pxy", ""),
+                "theta_DSMC": case.get("theta_mean", ""),
+                "theta_DSMC_std": case.get("theta_std", ""),
+                "theta_LAMMPS": lmp.get("theta", ""),
+            })
 
 
 # ---------------------------------------------------------------------------
@@ -999,17 +1051,17 @@ def plot_stress_overlay(dsmc_cases: list[dict],
         ax = axes_flat[ax_idx]
         mean_d, std_d = dsmc_vals[key]
 
-        # DSMC AR=2 — open squares, markers only
+        # DSMC spherocylinders — open squares, markers only
         h1, = ax.plot(dsmc_a, mean_d, ls="none", marker="s", ms=ms,
                       mec=C_DSMC, mfc="none", mew=1.6, zorder=4,
-                      label="DSMC AR=2")
+                      label=f"DSMC {SPHCYL_LABEL}")
         ax.fill_between(dsmc_a, mean_d - std_d, mean_d + std_d,
                         color=C_DSMC, alpha=0.18, zorder=2)
 
-        # LAMMPS AR=2 — filled squares, markers only
+        # LAMMPS spherocylinders — filled squares, markers only
         h2, = ax.plot(lsc_a, lsc_vals[key], ls="none", marker="s",
                       ms=ms - 1, color=C_LSC, zorder=5,
-                      label="LAMMPS AR=2")
+                      label=f"LAMMPS {SPHCYL_LABEL}")
 
         # LAMMPS spheres — filled circles, markers only
         h3, = ax.plot(lsp_a, lsp_vals[key], ls="none", marker="o",
@@ -1057,7 +1109,7 @@ def plot_stress_overlay(dsmc_cases: list[dict],
                bbox_to_anchor=(0.5, 0.0))
 
     fig.suptitle(
-        r"Reduced stress tensor $P_{ij}^* = P_{ij}/nT$  —  AR=2 spherocylinder vs sphere USF",
+        rf"Reduced stress tensor $P_{{ij}}^* = P_{{ij}}/nT$  —  {SPHCYL_LABEL} spherocylinder vs sphere USF",
         fontsize=11, y=1.01
     )
     fig.tight_layout(rect=[0, 0.06, 1, 1.0])
@@ -1089,11 +1141,12 @@ def plot_temperature_ratio(dsmc_cases: list[dict],
     fig, ax = plt.subplots(figsize=(6.5, 4.8))
 
     ax.plot(dsmc_a, dsmc_th, ls="none", marker="s", ms=ms,
-            mec=C_DSMC, mfc="none", mew=1.6, zorder=4, label="DSMC AR=2")
+            mec=C_DSMC, mfc="none", mew=1.6, zorder=4,
+            label=f"DSMC {SPHCYL_LABEL}")
     ax.fill_between(dsmc_a, dsmc_th - dsmc_ts, dsmc_th + dsmc_ts,
                     color=C_DSMC, alpha=0.18, zorder=2)
     ax.plot(lsc_a, lsc_th, ls="none", marker="s", ms=ms - 1,
-            color=C_LSC, zorder=5, label="LAMMPS AR=2")
+            color=C_LSC, zorder=5, label=f"LAMMPS {SPHCYL_LABEL}")
 
     ylo, yhi = _axis_limits([list(dsmc_th) + list(lsc_th)])
     if ylo is not None:
@@ -1109,7 +1162,7 @@ def plot_temperature_ratio(dsmc_cases: list[dict],
     ax.grid(True, ls="--", lw=0.4, alpha=0.45)
     ax.legend(fontsize=9.5, frameon=True, edgecolor="0.7", loc="best")
     ax.set_title(
-        r"Translational/rotational temperature ratio — USF steady state (AR=2)",
+        rf"Translational/rotational temperature ratio — USF steady state ({SPHCYL_LABEL})",
         fontsize=10
     )
 
@@ -1205,7 +1258,7 @@ def plot_lammps_steady_diagnostics(base_dir: Path, out_path: Path,
         axes[idx].set_visible(False)
 
     fig.suptitle(
-        "LAMMPS USF — steady-state diagnostics (AR=2 spherocylinder)\n"
+        f"LAMMPS USF — steady-state diagnostics ({SPHCYL_LABEL} spherocylinder)\n"
         "shaded = stats window  |  dashed line = stats start  |  dotted = plateau start",
         fontsize=10
     )
@@ -1292,7 +1345,7 @@ def plot_lammps_theta_diagnostics(base_dir: Path, out_path: Path):
         axes[idx].set_visible(False)
 
     fig.suptitle(
-        r"LAMMPS USF — temperature ratio $\theta = T_{\rm tr}/T_{\rm rot}$ (AR=2 spherocylinder)"
+        rf"LAMMPS USF — temperature ratio $\theta = T_{{\rm tr}}/T_{{\rm rot}}$ ({SPHCYL_LABEL} spherocylinder)"
         "\nshaded = stats window  |  dashed line = stats start  |  dotted = plateau start",
         fontsize=10
     )
@@ -1323,7 +1376,8 @@ def plot_nematic_order(lmp_nematic: list[dict], out_path: Path):
 
     ax.errorbar(alphas, S_mean, yerr=S_std,
                 fmt="s", ms=ms, color=C_LSC, ecolor=C_LSC,
-                elinewidth=1.0, capsize=3, zorder=5, label="LAMMPS AR=2")
+                elinewidth=1.0, capsize=3, zorder=5,
+                label=f"LAMMPS {SPHCYL_LABEL}")
 
     ax.axhline(0.0, color="0.55", ls="--", lw=1.0, zorder=2,
                label="Isotropic ($S=0$)")
@@ -1339,7 +1393,7 @@ def plot_nematic_order(lmp_nematic: list[dict], out_path: Path):
     ax.grid(True, ls="--", lw=0.4, alpha=0.45)
     ax.legend(fontsize=9.5, frameon=True, edgecolor="0.7", loc="best")
     ax.set_title(
-        "Nematic order parameter — AR=2 spherocylinder USF",
+        f"Nematic order parameter — {SPHCYL_LABEL} spherocylinder USF",
         fontsize=10
     )
 
@@ -1379,7 +1433,7 @@ def plot_angvel_distribution(lmp_angvel: list[dict], out_path: Path):
     # --- Left: z-spin energy fraction ---
     ax = axes[0]
     ax.plot(alphas, ratios, ls="none", marker="s", ms=ms,
-            color=C_LSC, zorder=5, label="LAMMPS AR=2")
+            color=C_LSC, zorder=5, label=f"LAMMPS {SPHCYL_LABEL}")
     if ratio_ref is not None:
         ax.axhline(ratio_ref, color="0.55", ls="--", lw=1.0, zorder=2,
                    label=rf"Elastic ($\alpha=1$) baseline")
@@ -1395,7 +1449,7 @@ def plot_angvel_distribution(lmp_angvel: list[dict], out_path: Path):
     # --- Right: normalised mean z-spin drift ---
     ax = axes[1]
     ax.plot(alphas, norm_mean, ls="none", marker="s", ms=ms,
-            color=C_LSC, zorder=5, label="LAMMPS AR=2")
+            color=C_LSC, zorder=5, label=f"LAMMPS {SPHCYL_LABEL}")
     ax.axhline(0.0, color="0.55", ls="--", lw=1.0, zorder=2,
                label="No net drift")
     ax.set_xlabel(r"Coefficient of restitution $\alpha$", fontsize=11)
@@ -1408,7 +1462,7 @@ def plot_angvel_distribution(lmp_angvel: list[dict], out_path: Path):
     ax.legend(fontsize=9.5, frameon=True, edgecolor="0.7", loc="best")
 
     fig.suptitle(
-        "Angular velocity distribution — AR=2 USF (streaming-subtracted z-spin)",
+        f"Angular velocity distribution — {SPHCYL_LABEL} USF (streaming-subtracted z-spin)",
         fontsize=10
     )
     fig.tight_layout()
@@ -1532,6 +1586,7 @@ def plot_stress_vs_astar(dsmc_spheres: list[dict],
 # ---------------------------------------------------------------------------
 
 def main():
+    global SPHCYL_LABEL
     parser = argparse.ArgumentParser(description="USF final overlay plots")
     parser.add_argument("--sweep-dir",      default="runs/AR2_usf_sweep")
     parser.add_argument("--lammps-sphcyl",  default="LAMMPS_data/USF/sphcyl_USF_AR2")
@@ -1541,7 +1596,10 @@ def main():
                              "subdirs) or NSP Fortran format (integer subdirs). "
                              "Pass empty string to skip.")
     parser.add_argument("--out-dir",        default=None)
+    parser.add_argument("--ar", type=float, default=2.0,
+                        help="Spherocylinder aspect ratio label for plots.")
     args = parser.parse_args()
+    SPHCYL_LABEL = f"AR={args.ar:g}"
 
     sweep_dir = Path(args.sweep_dir)
     out_dir   = Path(args.out_dir) if args.out_dir else sweep_dir / "figures_final"
@@ -1569,6 +1627,11 @@ def main():
     print("Loading LAMMPS angular velocity data...")
     lmp_angvel = load_lammps_angvel(Path(args.lammps_sphcyl))
     print(f"  {len(lmp_angvel)} cases loaded.")
+
+    write_dsmc_lammps_summary(
+        dsmc_cases, lmp_sphcyl, out_dir / "dsmc_lammps_usf_summary.csv"
+    )
+    print(f"  Wrote summary CSV: {out_dir / 'dsmc_lammps_usf_summary.csv'}")
 
     dsmc_spheres = None
     if args.dsmc_spheres:

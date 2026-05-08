@@ -5,7 +5,7 @@ from contextlib import nullcontext
 
 import numpy as np
 
-from .particle import compute_particle_params
+from .particle import compute_particle_params, result_ar_tag
 from .collision import sample_dissp
 from .pressure import compute_pij_k, accumulate_pij_c, normalise_pij_c
 from .non_gaussian import NonGaussianDiagnostics
@@ -728,14 +728,15 @@ def run_all_realizations(config, models):
     output_dir = config['simulation']['output_dir']
     AR = config['particle']['AR']
     alpha = config['system']['alpha']
+    ar_tag = result_ar_tag(AR)
 
     for i, seed in enumerate(seeds, start=1):
         flow_tag = "_USF" if config.get('flow', {}).get('mode') == 'usf' else ""
-        filename = f"AR{AR:.0f}_COR{int(alpha * 100)}{flow_tag}_R{i}.txt"
+        filename = f"{ar_tag}_COR{int(alpha * 100)}{flow_tag}_R{i}.txt"
         output_path = os.path.join(output_dir, filename)
         pressure_path = os.path.join(
             output_dir,
-            f"AR{AR:.0f}_COR{int(alpha * 100)}{flow_tag}_R{i}_pressure.txt"
+            f"{ar_tag}_COR{int(alpha * 100)}{flow_tag}_R{i}_pressure.txt"
         )
         print(f"Running realization {i}/{len(seeds)} (seed={seed})...")
         run_simulation(config, models, seed, output_path, pressure_path)

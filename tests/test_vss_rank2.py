@@ -60,3 +60,21 @@ def test_build_vss_alpha_eff_table_from_chi_fixture(tmp_path):
 
     table = load_vss_alpha_eff_table(str(output))
     assert np.isclose(lookup_vss_alpha_eff(table, 0.8, 2.0), expected_alpha_eff)
+
+
+def test_lookup_vss_alpha_eff_interpolates_for_ar_specific_table(tmp_path):
+    payload = {
+        "rows": [
+            {"alpha": 0.8, "AR": 1.5, "alpha_eff": 8.0},
+            {"alpha": 0.9, "AR": 1.5, "alpha_eff": 10.0},
+            {"alpha": 0.8, "AR": 2.5, "alpha_eff": 12.0},
+        ]
+    }
+    output = tmp_path / "vss_alpha_eff_AR15.json"
+    import json
+    output.write_text(json.dumps(payload))
+
+    table = load_vss_alpha_eff_table(str(output))
+
+    assert np.isclose(lookup_vss_alpha_eff(table, 0.85, 1.5), 9.0)
+    assert np.isclose(lookup_vss_alpha_eff(table, 0.8, 2.5), 12.0)

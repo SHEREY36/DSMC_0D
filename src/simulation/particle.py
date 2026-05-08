@@ -2,6 +2,24 @@ import numpy as np
 from dataclasses import dataclass
 
 
+def model_ar_tag(AR):
+    """Return artifact tag for AR-specific model files, e.g. 2.0 -> AR20."""
+    return f"AR{int(round(float(AR) * 10.0)):02d}"
+
+
+def result_ar_tag(AR):
+    """Return collision-safe result filename tag.
+
+    Historical integer-AR runs use AR2/AR3.  Fractional campaign runs use
+    AR15/AR25 so AR=1.5 does not collide with AR=2 output naming.
+    """
+    AR = float(AR)
+    rounded = round(AR)
+    if np.isclose(AR, rounded, atol=1.0e-12):
+        return f"AR{int(rounded)}"
+    return model_ar_tag(AR)
+
+
 @dataclass
 class SpherocylinderParams:
     """Derived physical properties of a spherocylinder particle."""

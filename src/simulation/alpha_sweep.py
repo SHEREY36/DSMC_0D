@@ -7,6 +7,7 @@ import yaml
 
 from src.simulation.collision import CollisionModels
 from src.simulation.dsmc import run_simulation
+from src.simulation.particle import result_ar_tag
 
 
 def _normalize_alpha(alpha):
@@ -225,12 +226,13 @@ def _run_single_seed(task):
 
     AR = config["particle"]["AR"]
     alpha = config["system"]["alpha"]
+    ar_tag = result_ar_tag(AR)
     flow_tag = "_USF" if config.get("flow", {}).get("mode") == "usf" else ""
-    filename = f"AR{AR:.0f}_COR{int(alpha * 100)}{flow_tag}_R{realization_idx}.txt"
+    filename = f"{ar_tag}_COR{int(alpha * 100)}{flow_tag}_R{realization_idx}.txt"
     output_path = os.path.join(config["simulation"]["output_dir"], filename)
     pressure_path = os.path.join(
         config["simulation"]["output_dir"],
-        f"AR{AR:.0f}_COR{int(alpha * 100)}{flow_tag}_R{realization_idx}_pressure.txt",
+        f"{ar_tag}_COR{int(alpha * 100)}{flow_tag}_R{realization_idx}_pressure.txt",
     )
 
     os.makedirs(config["simulation"]["output_dir"], exist_ok=True)

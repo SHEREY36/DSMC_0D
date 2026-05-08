@@ -21,7 +21,10 @@ if __package__ is None or __package__ == "":
         sys.path.insert(0, str(DSMC0D_ROOT))
 
 from src.postprocessing.analysis import load_dsmc_results, load_pressure_results
-from src.simulation.particle import compute_particle_params
+from src.simulation.particle import compute_particle_params, result_ar_tag
+
+
+SPHCYL_LABEL = "AR=2"
 
 
 @dataclass
@@ -121,10 +124,25 @@ def choose_steady_start(time: np.ndarray, tmix: np.ndarray) -> tuple[float, floa
 
 
 def result_paths(case_dir: Path, alpha: float) -> tuple[Path, Path]:
+    with open(case_dir / "config.yaml", "r", encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+    ar_tags = [
+        result_ar_tag(cfg["particle"]["AR"]),
+        f"AR{int(round(float(cfg['particle']['AR'])))}",
+    ]
+    ar_tags = list(dict.fromkeys(ar_tags))
     tag = int(round(alpha * 100.0))
-    result_file = case_dir / "results" / f"AR2_COR{tag}_USF_R1.txt"
-    pressure_file = case_dir / "results" / f"AR2_COR{tag}_USF_R1_pressure.txt"
-    return result_file, pressure_file
+    candidates = [
+        (
+            case_dir / "results" / f"{ar_tag}_COR{tag}_USF_R1.txt",
+            case_dir / "results" / f"{ar_tag}_COR{tag}_USF_R1_pressure.txt",
+        )
+        for ar_tag in ar_tags
+    ]
+    for result_file, pressure_file in candidates:
+        if result_file.exists() and pressure_file.exists():
+            return result_file, pressure_file
+    return candidates[0]
 
 
 def summarize_case(case_dir: Path) -> CaseSummary:
@@ -280,7 +298,7 @@ def plot_stress(rows: list[CaseSummary], out_path: Path) -> None:
         ax.grid(alpha=0.3)
     axes[1, 0].set_xlabel("Coefficient of Restitution e")
     axes[1, 1].set_xlabel("Coefficient of Restitution e")
-    fig.suptitle("Reduced Stress Tensor - DSMC 0D Spherocylinder USF (AR=2.0)", y=0.98)
+    fig.suptitle(f"Reduced Stress Tensor - DSMC 0D Spherocylinder USF ({SPHCYL_LABEL})", y=0.98)
     fig.tight_layout()
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
@@ -303,7 +321,7 @@ def plot_temperature_diagnostics(rows: list[CaseSummary], rep_case: CaseSummary,
     ax.plot(e, ratio, "s-", lw=1.9, ms=5.5, color="tab:orange")
     ax.set_xlabel("Coefficient of Restitution e")
     ax.set_ylabel(r"Steady $T_{tr}/T_{rot}$")
-    ax.set_title(r"Asymptotic Temperature Ratio - AR=2.0")
+    ax.set_title(f"Asymptotic Temperature Ratio - {SPHCYL_LABEL}")
     ax.grid(alpha=0.3)
 
     ax = axes[1]
@@ -337,7 +355,7 @@ def plot_temperature_diagnostics(rows: list[CaseSummary], rep_case: CaseSummary,
     ax.grid(alpha=0.3)
     ax.legend(loc="best", fontsize=8.5)
 
-    fig.suptitle("Temperature Diagnostics - DSMC 0D Spherocylinder USF (AR=2.0)", y=1.02)
+    fig.suptitle(f"Temperature Diagnostics - DSMC 0D Spherocylinder USF ({SPHCYL_LABEL})", y=1.02)
     fig.tight_layout()
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -367,7 +385,7 @@ def plot_stress_overlay(dsmc_rows: list[CaseSummary], lammps_rows: list[dict[str
         ax.legend(loc="best", fontsize=8.5)
     axes[1, 0].set_xlabel("Coefficient of Restitution e")
     axes[1, 1].set_xlabel("Coefficient of Restitution e")
-    fig.suptitle("Reduced Stress Overlay - Spherocylinder USF (AR=2.0)", y=0.98)
+    fig.suptitle(f"Reduced Stress Overlay - Spherocylinder USF ({SPHCYL_LABEL})", y=0.98)
     fig.tight_layout()
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
@@ -409,7 +427,7 @@ def plot_temperature_overlay(
     ax.plot(e_d, ratio_d, "s-", lw=1.9, ms=5.2, color="tab:green", label="DSMC 0D")
     ax.set_xlabel("Coefficient of Restitution e")
     ax.set_ylabel(r"Steady $T_{tr}/T_{rot}$")
-    ax.set_title(r"Asymptotic Temperature Ratio - AR=2.0")
+    ax.set_title(f"Asymptotic Temperature Ratio - {SPHCYL_LABEL}")
     ax.grid(alpha=0.3)
     ax.legend(loc="best", fontsize=8.8)
 
@@ -444,7 +462,7 @@ def plot_temperature_overlay(
     ax.legend(loc="best", fontsize=8.0)
 
     fig.suptitle(
-        "Temperature Overlay - Spherocylinder USF (AR=2.0)\n"
+        f"Temperature Overlay - Spherocylinder USF ({SPHCYL_LABEL})\n"
         "Separate actual-time steady windows for DSMC and LAMMPS",
         y=1.04,
     )
@@ -454,12 +472,15 @@ def plot_temperature_overlay(
 
 
 def main() -> None:
+    global SPHCYL_LABEL
     parser = argparse.ArgumentParser(description="AR=2 0D DSMC vs LAMMPS USF diagnostics.")
     parser.add_argument("--sweep-dir", default="runs/AR2_usf_sweep")
     parser.add_argument("--lammps-dir", default="/home/muhammed/Documents/LAMMPS/runs/sphcyl_USF_AR2")
     parser.add_argument("--rep-e", type=float, default=0.80)
     parser.add_argument("--lammps-avg-frac", type=float, default=0.50)
+    parser.add_argument("--ar", type=float, default=2.0)
     args = parser.parse_args()
+    SPHCYL_LABEL = f"AR={args.ar:g}"
 
     sweep_dir = Path(args.sweep_dir).resolve()
     out_dir = sweep_dir / "figures"
