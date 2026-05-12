@@ -32,13 +32,14 @@ def peta_tag(p_eta):
     return f"peta{int(round(float(p_eta) * 100.0)):03d}"
 
 
-def default_output_root(AR, mode, p_eta=None):
+def default_output_root(AR, mode, p_eta=None, rank2_correction_enabled=False):
     ar_tag = model_ar_tag(AR)
+    rank2_suffix = "_C2" if rank2_correction_enabled else ""
     if mode == "stress_weight":
-        return f"runs/{ar_tag}_usf_{peta_tag(p_eta)}"
+        return f"runs/{ar_tag}_usf_{peta_tag(p_eta)}{rank2_suffix}"
     if mode == "vss_rank2":
-        return f"runs/{ar_tag}_usf_vss_rank2"
-    return f"runs/{ar_tag}_usf_current"
+        return f"runs/{ar_tag}_usf_vss_rank2{rank2_suffix}"
+    return f"runs/{ar_tag}_usf_current{rank2_suffix}"
 
 
 def default_lammps_dir(AR):
@@ -49,7 +50,8 @@ def default_lammps_dir(AR):
 
 
 def update_nested(cfg, AR, mode, p_eta, output_root, workers, vss_table,
-                  seeds, alpha_values, t_end, dt, dtau):
+                  seeds, alpha_values, t_end, dt, dtau,
+                  rank2_correction_enabled=False, C2_table=None):
     ar_tag = model_ar_tag(AR)
     cfg = copy.deepcopy(cfg)
 
@@ -66,6 +68,8 @@ def update_nested(cfg, AR, mode, p_eta, output_root, workers, vss_table,
     sim.pop("angular_transport_probability_override", None)
     sim.pop("stress_transport_weight_file", None)
     sim.pop("vss_alpha_eff_table_file", None)
+    sim["rank2_correction_enabled"] = bool(rank2_correction_enabled)
+    sim["C2_table_file"] = str(C2_table or f"models/C2_table_{ar_tag}.json")
 
     if mode == "current":
         sim["angular_transport_model"] = "current"
@@ -151,6 +155,16 @@ def main():
     )
     parser.add_argument("--p-eta", type=float, default=None)
     parser.add_argument("--vss-table", default=None)
+    parser.add_argument(
+        "--rank2-correction-enabled",
+        action="store_true",
+        help="Enable the USF C2*a2 correction in the generated DSMC config.",
+    )
+    parser.add_argument(
+        "--C2-table",
+        default=None,
+        help="Rank-2 C2 table path. Defaults to models/C2_table_AR*.json.",
+    )
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--workers", type=int, default=5)
     parser.add_argument("--seeds", default=None, help="Comma-separated integer seeds.")
@@ -167,7 +181,12 @@ def main():
     with open(args.base_config, "r") as f:
         base = yaml.safe_load(f)
 
-    output_root = args.output_root or default_output_root(args.AR, args.mode, args.p_eta)
+    output_root = args.output_root or default_output_root(
+        args.AR,
+        args.mode,
+        args.p_eta,
+        rank2_correction_enabled=args.rank2_correction_enabled,
+    )
     cfg = update_nested(
         base,
         AR=args.AR,
@@ -181,6 +200,8 @@ def main():
         t_end=args.t_end,
         dt=args.dt,
         dtau=args.dtau,
+        rank2_correction_enabled=args.rank2_correction_enabled,
+        C2_table=args.C2_table,
     )
 
     out_path = Path(args.config_out)
@@ -194,6 +215,8 @@ def main():
         print(f"  p_eta={args.p_eta:g}")
     if args.vss_table:
         print(f"  vss_table={args.vss_table}")
+    if args.rank2_correction_enabled:
+        print(f"  C2_table={cfg['simulation']['C2_table_file']}")
     print(f"  output_root={output_root}")
 
 

@@ -17,6 +17,7 @@ from src.simulation.vss_rank2 import (
     load_vss_alpha_eff_table,
     lookup_vss_alpha_eff,
 )
+from src.simulation.rank2_correction import load_C2_table, lookup_C2
 
 
 class CollisionModels:
@@ -24,7 +25,8 @@ class CollisionModels:
 
     def __init__(self, model_dir, gmm_npz_path=None, ftr_params_path=None,
                  zr_eff_path=None, c_alpha_path=None, stress_transport_path=None,
-                 ctc_angular_path=None, vss_alpha_eff_path=None):
+                 ctc_angular_path=None, vss_alpha_eff_path=None,
+                 C2_path=None):
         """Load all model artifacts.
 
         Parameters:
@@ -41,15 +43,18 @@ class CollisionModels:
                                    diagnose_stress_transport_weight.py.
             ctc_angular_path: optional CTC angular conditional .npz artifact.
             vss_alpha_eff_path: optional VSS rank-2 alpha_eff JSON table.
+            C2_path: optional rank-2 C2 correction JSON table.
         """
         self.model_dir = model_dir
         self._load_all(
             gmm_npz_path, ftr_params_path, zr_eff_path, c_alpha_path,
-            stress_transport_path, ctc_angular_path, vss_alpha_eff_path
+            stress_transport_path, ctc_angular_path, vss_alpha_eff_path,
+            C2_path
         )
 
     def _load_all(self, gmm_npz_path, ftr_params_path, zr_eff_path, c_alpha_path,
-                  stress_transport_path, ctc_angular_path, vss_alpha_eff_path):
+                  stress_transport_path, ctc_angular_path, vss_alpha_eff_path,
+                  C2_path):
         """Load all serialized model artifacts from disk."""
         # Conditional GMM (from pre-computed .npz)
         if gmm_npz_path is None:
@@ -155,6 +160,18 @@ class CollisionModels:
                 print(
                     f"  Warning: VSS alpha_eff table not found at "
                     f"{vss_alpha_eff_path}; vss_rank2 angular mode disabled."
+                )
+
+        # Rank-2 C2 energy-routing correction table (optional)
+        if C2_path and os.path.exists(C2_path):
+            self.C2_table = load_C2_table(C2_path)
+            print(f"  Loaded C2 table: {C2_path}")
+        else:
+            self.C2_table = None
+            if C2_path:
+                print(
+                    f"  Warning: C2 table not found at {C2_path}; "
+                    f"rank-2 f_tr correction unavailable."
                 )
 
         # Conditional chi Beta model (optional — falls back to marginal rejection sampler)
@@ -282,6 +299,15 @@ class CollisionModels:
                 "simulation.vss_alpha_eff_table_file."
             )
         return lookup_vss_alpha_eff(self.vss_alpha_eff_table, alpha, AR)
+
+    def get_C2(self, alpha, AR):
+        """Look up the rank-2 C2 f_tr correction coefficient."""
+        if self.C2_table is None:
+            raise RuntimeError(
+                "C2 table not loaded. Run build_C2_table.py or set "
+                "simulation.C2_table_file."
+            )
+        return lookup_C2(self.C2_table, alpha, AR)
 
 
 def load_stress_transport_weights(filepath):

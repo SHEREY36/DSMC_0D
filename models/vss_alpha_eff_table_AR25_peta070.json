@@ -1,0 +1,123 @@
+{
+  "metadata": {
+    "model": "vss_rank2",
+    "formula": "cos_chi = 2*R^(1/alpha_eff) - 1",
+    "rank2_moment": "6*alpha_eff/((alpha_eff+1)*(alpha_eff+2))",
+    "branch": "forward",
+    "AR": 2.5,
+    "p_eta": 0.7,
+    "ctc_root": "/home/muhammed/Documents/Thesis/Coll_Models/results"
+  },
+  "rows": [
+    {
+      "alpha": 0.5,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.900825553861773,
+      "beta_target": 0.6305778877032411,
+      "alpha_eff": 6.192088722143881,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.50_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.55,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9136627513620665,
+      "beta_target": 0.6395639259534466,
+      "alpha_eff": 6.050860667528385,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.55_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.6,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9244747489908655,
+      "beta_target": 0.6471323242936058,
+      "alpha_eff": 5.934671433907047,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.60_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.65,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9325792891141083,
+      "beta_target": 0.6528055023798758,
+      "alpha_eff": 5.849170153955698,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.65_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.7,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9396126978041476,
+      "beta_target": 0.6577288884629032,
+      "alpha_eff": 5.776041751373027,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.70_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.75,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9460635912429419,
+      "beta_target": 0.6622445138700593,
+      "alpha_eff": 5.709824224852933,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.75_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.8,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9516215645876422,
+      "beta_target": 0.6661350952113495,
+      "alpha_eff": 5.65341336441782,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.80_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.85,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9568845664939392,
+      "beta_target": 0.6698191965457574,
+      "alpha_eff": 5.600532236195092,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.85_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.9,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.961660677443912,
+      "beta_target": 0.6731624742107384,
+      "alpha_eff": 5.552986243636421,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.90_r1.00_AR2.5"
+    },
+    {
+      "alpha": 0.95,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9658932178839964,
+      "beta_target": 0.6761252525187974,
+      "alpha_eff": 5.51119789909402,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_0.95_r1.00_AR2.5"
+    },
+    {
+      "alpha": 1.0,
+      "AR": 2.5,
+      "p_eta": 0.7,
+      "beta_ctc": 0.9697054626465218,
+      "beta_target": 0.6787938238525653,
+      "alpha_eff": 5.473833657756132,
+      "n_events": 100000,
+      "source": "/home/muhammed/Documents/Thesis/Coll_Models/results/alpha_1.00_r1.00_AR2.5"
+    }
+  ]
+}

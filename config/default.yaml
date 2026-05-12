@@ -33,6 +33,8 @@ simulation:
   # Experimental stress_weight override: probability of full angular scattering.
   angular_transport_probability_override: null
   vss_alpha_eff_table_file: models/vss_alpha_eff_table_AR20_peta060.json
+  rank2_correction_enabled: false  # USF-only f_tr correction: C_alpha -> C_alpha*(1 + C2*a2)
+  C2_table_file: models/C2_table_AR20.json
   hcs_rescale_temperature: false  # HCS-only thermostat for reduced-variable statistics
   hcs_rescale_reference: initial   # currently supports 'initial'
 

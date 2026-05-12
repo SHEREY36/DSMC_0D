@@ -11,6 +11,7 @@ from .pressure import compute_pij_k, accumulate_pij_c, normalise_pij_c
 from .non_gaussian import NonGaussianDiagnostics
 from .mu_joint import mu_plane_post_relative_with_eps
 from .vss_rank2 import sample_vss_chi
+from .rank2_correction import compute_rank2_a2, apply_rank2_ftr_correction
 from src.preprocessing.relaxation import prepare_theta, Zr
 
 
@@ -242,6 +243,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         prob_one_hit = 1.0
         beta_a = beta_b = 0.0
         C_alpha = 1.0
+        C2_alpha = 0.0
         p_eta = 1.0
         p_eta_elastic = 1.0
         vss_alpha_eff = None
@@ -258,6 +260,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         beta_b = config['preprocessing']['dissipation']['beta_b']
 
         C_alpha = config['system'].get('C_alpha') or models.get_C_alpha(alpha, params.AR)
+        C2_alpha = 0.0
         if angular_transport_model == 'stress_weight':
             if angular_probability_override is None:
                 raise ValueError(
@@ -284,6 +287,13 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         raise ValueError(f"flow.mode must be 'hcs' or 'usf', got {flow_mode!r}")
     if flow_mode == 'usf' and gdot == 0.0:
         print("  Warning: USF mode with gdot=0 is equivalent to HCS.")
+    rank2_correction_active = (
+        bool(sim_cfg.get('rank2_correction_enabled', False))
+        and flow_mode == 'usf'
+        and not sphere_mode
+    )
+    if rank2_correction_active:
+        C2_alpha = models.get_C2(alpha, params.AR)
     hcs_rescale_temperature = bool(
         config.get('simulation', {}).get('hcs_rescale_temperature', False)
     )
@@ -418,6 +428,8 @@ def run_simulation(config, models, seed, output_path, pressure_path):
               f"angular_transport={angular_transport_model}, "
               f"p_eta={p_eta:.6f}, "
               f"vss_alpha_eff={vss_alpha_eff if vss_alpha_eff is not None else 'n/a'}, "
+              f"C2={C2_alpha:.6f}, "
+              f"rank2_correction={rank2_correction_active}, "
               f"hcs_rescale={hcs_rescale_temperature}, "
               f"equilibration_time={equilibration_time:.3f}, {flow_str}")
 
@@ -487,6 +499,10 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                           * np.sum(np.sum(vel**2, axis=1)) / (3.0 * Np))
                 Trot = np.sum(Er) / float(Np)
                 temp_ratio = Ttrans / Trot if Trot > 0.0 else 1.0
+                rank2_a2_live = (
+                    compute_rank2_a2(vel, params.mass)
+                    if rank2_correction_active else 0.0
+                )
 
                 # NTC collision selection — batch all candidates at once.
                 # Rejection screening is vectorized; only the ~16% accepted pairs
@@ -618,7 +634,14 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                                 gamma = gamma * gamma_max * prob_one_hit
 
                             _theta = max(temp_ratio, 1e-10)
-                            f_tr = C_alpha * 3.0 * _theta / (3.0 * _theta + 2.0)
+                            C2_step = (
+                                C2_alpha
+                                if rank2_correction_active and not in_equilibration
+                                else 0.0
+                            )
+                            f_tr = apply_rank2_ftr_correction(
+                                C_alpha, _theta, C2=C2_step, a2=rank2_a2_live
+                            )
 
                             delta_E = gamma * Etotal_i
                             Etrans_f = epsilon_tr_f * Etotal_i - f_tr * delta_E

@@ -216,12 +216,18 @@ def _run_single_seed(task):
         vss_alpha_eff_path = config.get("simulation", {}).get(
             "vss_alpha_eff_table_file"
         )
+        C2_path = (
+            config.get("simulation", {}).get("C2_table_file")
+            if config.get("simulation", {}).get("rank2_correction_enabled", False)
+            else None
+        )
         models = CollisionModels(
             model_dir, gmm_npz_path=gmm_npz, ftr_params_path=ftr_path,
             zr_eff_path=zr_eff_path, c_alpha_path=c_alpha_path,
             stress_transport_path=stress_transport_path,
             ctc_angular_path=ctc_angular_path,
-            vss_alpha_eff_path=vss_alpha_eff_path
+            vss_alpha_eff_path=vss_alpha_eff_path,
+            C2_path=C2_path
         )
 
     AR = config["particle"]["AR"]
