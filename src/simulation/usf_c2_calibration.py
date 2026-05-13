@@ -81,33 +81,49 @@ def reduced_kinetic_a2(Pk_reduced):
     raise ValueError(f"Pk_reduced must have shape (3, 3) or (N, 3, 3), got {Pk.shape}")
 
 
+def rank0_ftr(C_alpha, theta):
+    theta = max(float(theta), 1.0e-10)
+    return float(C_alpha) * 3.0 * theta / (3.0 * theta + 2.0)
+
+
 def infer_C2_from_theta_gap(theta_dsmc, theta_lammps, a2_steady, C_alpha,
-                            min_a2=1.0e-12):
-    """Invert the local theta-gap sensitivity relation for one row."""
+                            theta_probe=None, probe_delta=None,
+                            min_a2=1.0e-12, min_abs_chi=1.0e-12):
+    """Invert the USF theta gap using a DSMC-measured probe sensitivity."""
     theta_dsmc = float(theta_dsmc)
     theta_lammps = float(theta_lammps)
     a2_steady = float(a2_steady)
     C_alpha = float(C_alpha)
+    theta_probe = None if theta_probe is None else float(theta_probe)
+    probe_delta = None if probe_delta is None else float(probe_delta)
 
-    f_tr0 = C_alpha * 3.0 * theta_dsmc / (3.0 * theta_dsmc + 2.0)
+    f_tr0 = rank0_ftr(C_alpha, theta_dsmc)
     delta_theta = theta_lammps - theta_dsmc
     status = "ok"
     valid = True
     C2 = 0.0
     chi = float("nan")
 
-    if not all(np.isfinite(x) for x in [theta_dsmc, theta_lammps, a2_steady, C_alpha, f_tr0]):
+    required = [theta_dsmc, theta_lammps, a2_steady, C_alpha, f_tr0]
+    if theta_probe is not None:
+        required.append(theta_probe)
+    if probe_delta is not None:
+        required.append(probe_delta)
+    if not all(np.isfinite(x) for x in required):
         status = "nonfinite_input"
         valid = False
     elif a2_steady <= float(min_a2):
         status = "near_zero_a2"
         valid = False
-    elif abs(1.0 - f_tr0) <= 1.0e-12:
-        status = "singular_chi"
+    elif theta_probe is None or probe_delta is None:
+        status = "missing_probe_sensitivity"
+        valid = False
+    elif abs(probe_delta) <= 1.0e-30:
+        status = "zero_probe_delta"
         valid = False
     else:
-        chi = theta_dsmc / (1.0 - f_tr0)
-        if not np.isfinite(chi) or chi == 0.0:
+        chi = (theta_probe - theta_dsmc) / probe_delta
+        if not np.isfinite(chi) or abs(chi) <= float(min_abs_chi):
             status = "invalid_chi"
             valid = False
         else:
@@ -124,6 +140,8 @@ def infer_C2_from_theta_gap(theta_dsmc, theta_lammps, a2_steady, C_alpha,
         "delta_theta": float(delta_theta),
         "f_tr0": float(f_tr0),
         "chi": float(chi),
+        "theta_probe": None if theta_probe is None else float(theta_probe),
+        "probe_delta": None if probe_delta is None else float(probe_delta),
     }
 
 
@@ -335,16 +353,20 @@ def build_usf_C2_table(
     lammps_root,
     C_alpha_table_file,
     AR,
+    probe_root,
+    probe_delta=None,
     output_path=None,
     stats_fraction=0.50,
     plateau_threshold=5.0e-4,
     smooth_window=51,
     lammps_tail_fraction=0.30,
     min_a2=1.0e-12,
+    min_abs_chi=1.0e-12,
 ):
     """Build a USF theta-gap calibrated C2 table for one aspect ratio."""
     AR = float(AR)
     dsmc_root = Path(dsmc_root)
+    probe_root = Path(probe_root)
     lammps_root = Path(lammps_root)
     C_alpha_rows = load_C_alpha_table(C_alpha_table_file)
 
@@ -362,10 +384,25 @@ def build_usf_C2_table(
         lammps_case = lammps_case_for_alpha(lammps_root, alpha)
         lammps = load_lammps_theta(lammps_case, tail_fraction=lammps_tail_fraction)
         lammps_stress = load_lammps_stress(lammps_case, tail_fraction=lammps_tail_fraction)
+        probe_case = probe_root / case_dir.name
+        probe = load_dsmc_usf_case(
+            probe_case,
+            stats_fraction=stats_fraction,
+            plateau_threshold=plateau_threshold,
+            smooth_window=smooth_window,
+        )
+        case_probe_delta = probe_delta
+        if case_probe_delta is None:
+            with open(probe_case / "config.yaml", "r") as f:
+                probe_cfg = yaml.safe_load(f)
+            case_probe_delta = probe_cfg.get("simulation", {}).get(
+                "ftr_rank0_probe_delta"
+            )
         C_alpha = lookup_C_alpha(C_alpha_rows, alpha, AR)
         inverted = infer_C2_from_theta_gap(
             dsmc["theta"], lammps["theta"], dsmc["a2_steady"], C_alpha,
-            min_a2=min_a2,
+            theta_probe=probe["theta"], probe_delta=case_probe_delta,
+            min_a2=min_a2, min_abs_chi=min_abs_chi,
         )
         row = {
             "alpha": float(alpha),
@@ -377,17 +414,23 @@ def build_usf_C2_table(
             "theta_DSMC_std": float(dsmc["theta_std"]),
             "theta_LAMMPS": float(lammps["theta"]),
             "theta_LAMMPS_std": float(lammps["theta_std"]),
+            "theta_probe": float(probe["theta"]),
+            "theta_probe_std": float(probe["theta_std"]),
             "delta_theta": float(inverted["delta_theta"]),
             "a2_steady": float(dsmc["a2_steady"]),
             "a2_steady_std": float(dsmc["a2_std"]),
             "C_alpha": float(C_alpha),
             "f_tr0": float(inverted["f_tr0"]),
-            "chi": float(inverted["chi"]),
+            "chi_DSMC": float(inverted["chi"]),
+            "probe_delta": float(case_probe_delta),
             "n_dsmc_seeds": int(dsmc["n_seeds"]),
+            "n_probe_seeds": int(probe["n_seeds"]),
             "n_lammps_samples": int(lammps["n_samples"]),
             "dsmc_source_folder": str(case_dir),
+            "probe_source_folder": str(probe_case),
             "lammps_source_folder": str(lammps_case),
             "dsmc_seed_rows": dsmc["seed_rows"],
+            "probe_seed_rows": probe["seed_rows"],
             "lammps_stress_diagnostic": lammps_stress,
         }
         rows.append(row)
@@ -398,16 +441,20 @@ def build_usf_C2_table(
     payload = {
         "metadata": {
             "model": "rank2_C2",
-            "method": "usf_theta_gap_calibration",
+            "method": "usf_theta_gap_measured_sensitivity",
             "deployed_formula": (
                 "f_tr = C_alpha * (1 + C2(alpha, AR) * a2_live) "
                 "* 3*theta/(3*theta + 2)"
             ),
             "calibration_a2": "steady kinetic pressure tensor from DSMC USF baseline",
             "runtime_a2": "live particle-velocity invariant in dsmc.py",
-            "sensitivity": "chi = theta_DSMC / (1 - f_tr0)",
+            "sensitivity": (
+                "chi_DSMC = (theta_probe - theta_DSMC) / probe_delta"
+            ),
             "f_tr0": "C_alpha * 3*theta_DSMC/(3*theta_DSMC + 2)",
             "dsmc_root": str(dsmc_root),
+            "probe_root": str(probe_root),
+            "probe_delta": None if probe_delta is None else float(probe_delta),
             "lammps_root": str(lammps_root),
             "C_alpha_table_file": str(C_alpha_table_file),
             "AR": float(AR),
@@ -420,7 +467,7 @@ def build_usf_C2_table(
             },
             "pressure_normalization": "Pk_reduced = Pk_mean/(n*T_tr_steady)",
             "invalid_row_policy": (
-                "Rows with near-zero a2 or singular sensitivity are retained "
+                "Rows with near-zero a2 or singular measured sensitivity are retained "
                 "with valid=false and C2=0.0"
             ),
         },
@@ -437,21 +484,27 @@ def build_usf_C2_table(
 
 
 def default_paths_for_AR(AR, runs_root="runs", lammps_usf_root="LAMMPS_data/USF2",
-                         models_dir="models"):
+                         models_dir="models", probe_tag="probe_m010"):
     result_tag = result_ar_tag(AR)
     model_tag = model_ar_tag(AR)
     run_candidates = [
         Path(runs_root) / f"{result_tag}_usf_vss_rank2",
         Path(runs_root) / f"{model_tag}_usf_vss_rank2",
     ]
+    probe_candidates = [
+        Path(runs_root) / f"{result_tag}_usf_vss_rank2_{probe_tag}",
+        Path(runs_root) / f"{model_tag}_usf_vss_rank2_{probe_tag}",
+    ]
     lammps_candidates = [
         Path(lammps_usf_root) / result_tag,
         Path(lammps_usf_root) / model_tag,
     ]
     dsmc_root = next((path for path in run_candidates if path.exists()), run_candidates[0])
+    probe_root = next((path for path in probe_candidates if path.exists()), probe_candidates[0])
     lammps_root = next((path for path in lammps_candidates if path.exists()), lammps_candidates[0])
     return {
         "dsmc_root": dsmc_root,
+        "probe_root": probe_root,
         "lammps_root": lammps_root,
         "C_alpha_table_file": Path(models_dir) / f"C_alpha_table_{model_tag}.json",
         "output_path": Path(models_dir) / f"C2_table_{model_tag}.json",

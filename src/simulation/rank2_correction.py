@@ -58,6 +58,13 @@ def apply_rank2_ftr_correction(C_alpha, theta, C2=0.0, a2=0.0):
     return float(C_alpha) * factor * 3.0 * theta / (3.0 * theta + 2.0)
 
 
+def apply_rank0_ftr_probe(C_alpha, theta, delta=0.0):
+    """Return rank-0 f_tr multiplied by a finite-difference probe factor."""
+    theta = max(float(theta), 1.0e-10)
+    factor = 1.0 + float(delta)
+    return float(C_alpha) * factor * 3.0 * theta / (3.0 * theta + 2.0)
+
+
 def parse_case_dir(case_dir):
     match = CASE_RE.search(os.path.basename(str(case_dir)))
     if match is None:

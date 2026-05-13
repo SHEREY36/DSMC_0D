@@ -32,17 +32,42 @@ def main():
     parser.add_argument("--runs-root", default="runs")
     parser.add_argument("--lammps-usf-root", default="LAMMPS_data/USF2")
     parser.add_argument("--models-dir", default="models")
+    parser.add_argument(
+        "--probe-tag",
+        default="probe_m010",
+        help=(
+            "Suffix tag for default probe roots, e.g. probe_m010 gives "
+            "runs/AR2_usf_vss_rank2_probe_m010."
+        ),
+    )
+    parser.add_argument(
+        "--probe-runs-root",
+        default=None,
+        help=(
+            "Explicit probe sweep root. Only use with a single --AR value; "
+            "otherwise default AR-specific probe roots are used."
+        ),
+    )
+    parser.add_argument(
+        "--probe-delta",
+        type=float,
+        default=None,
+        help="Probe delta. If omitted, each probe config supplies it.",
+    )
     parser.add_argument("--stats-fraction", type=float, default=0.50)
     parser.add_argument("--plateau-threshold", type=float, default=5.0e-4)
     parser.add_argument("--smooth-window", type=int, default=51)
     parser.add_argument("--lammps-tail-fraction", type=float, default=0.30)
     parser.add_argument("--min-a2", type=float, default=1.0e-12)
+    parser.add_argument("--min-abs-chi", type=float, default=1.0e-12)
     parser.add_argument(
         "--strict",
         action="store_true",
         help="Fail if a requested AR is missing DSMC, LAMMPS, or C_alpha input.",
     )
     args = parser.parse_args()
+    if args.probe_runs_root is not None and len(args.AR) != 1:
+        raise ValueError("--probe-runs-root can only be used with one --AR value")
 
     built = []
     skipped = []
@@ -52,9 +77,13 @@ def main():
             runs_root=args.runs_root,
             lammps_usf_root=args.lammps_usf_root,
             models_dir=args.models_dir,
+            probe_tag=args.probe_tag,
         )
+        if args.probe_runs_root is not None:
+            paths["probe_root"] = Path(args.probe_runs_root)
         required = [
             paths["dsmc_root"],
+            paths["probe_root"],
             paths["lammps_root"],
             paths["C_alpha_table_file"],
         ]
@@ -72,12 +101,15 @@ def main():
             lammps_root=paths["lammps_root"],
             C_alpha_table_file=paths["C_alpha_table_file"],
             AR=AR,
+            probe_root=paths["probe_root"],
+            probe_delta=args.probe_delta,
             output_path=paths["output_path"],
             stats_fraction=args.stats_fraction,
             plateau_threshold=args.plateau_threshold,
             smooth_window=args.smooth_window,
             lammps_tail_fraction=args.lammps_tail_fraction,
             min_a2=args.min_a2,
+            min_abs_chi=args.min_abs_chi,
         )
         rows = payload["rows"]
         valid = sum(1 for row in rows if row.get("valid", True))

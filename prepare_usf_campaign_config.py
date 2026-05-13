@@ -32,14 +32,24 @@ def peta_tag(p_eta):
     return f"peta{int(round(float(p_eta) * 100.0)):03d}"
 
 
-def default_output_root(AR, mode, p_eta=None, rank2_correction_enabled=False):
+def probe_tag(delta):
+    value = int(round(abs(float(delta)) * 100.0))
+    sign = "m" if float(delta) < 0.0 else "p"
+    return f"probe_{sign}{value:03d}"
+
+
+def default_output_root(AR, mode, p_eta=None, rank2_correction_enabled=False,
+                        ftr_rank0_probe_delta=None):
     ar_tag = model_ar_tag(AR)
-    rank2_suffix = "_C2" if rank2_correction_enabled else ""
+    if ftr_rank0_probe_delta is not None:
+        suffix = f"_{probe_tag(ftr_rank0_probe_delta)}"
+    else:
+        suffix = "_C2" if rank2_correction_enabled else ""
     if mode == "stress_weight":
-        return f"runs/{ar_tag}_usf_{peta_tag(p_eta)}{rank2_suffix}"
+        return f"runs/{ar_tag}_usf_{peta_tag(p_eta)}{suffix}"
     if mode == "vss_rank2":
-        return f"runs/{ar_tag}_usf_vss_rank2{rank2_suffix}"
-    return f"runs/{ar_tag}_usf_current{rank2_suffix}"
+        return f"runs/{ar_tag}_usf_vss_rank2{suffix}"
+    return f"runs/{ar_tag}_usf_current{suffix}"
 
 
 def default_lammps_dir(AR):
@@ -51,7 +61,8 @@ def default_lammps_dir(AR):
 
 def update_nested(cfg, AR, mode, p_eta, output_root, workers, vss_table,
                   seeds, alpha_values, t_end, dt, dtau,
-                  rank2_correction_enabled=False, C2_table=None):
+                  rank2_correction_enabled=False, C2_table=None,
+                  ftr_rank0_probe_delta=None):
     ar_tag = model_ar_tag(AR)
     cfg = copy.deepcopy(cfg)
 
@@ -68,8 +79,15 @@ def update_nested(cfg, AR, mode, p_eta, output_root, workers, vss_table,
     sim.pop("angular_transport_probability_override", None)
     sim.pop("stress_transport_weight_file", None)
     sim.pop("vss_alpha_eff_table_file", None)
-    sim["rank2_correction_enabled"] = bool(rank2_correction_enabled)
+    sim["rank2_correction_enabled"] = (
+        bool(rank2_correction_enabled)
+        and ftr_rank0_probe_delta is None
+    )
     sim["C2_table_file"] = str(C2_table or f"models/C2_table_{ar_tag}.json")
+    sim["ftr_rank0_probe_delta"] = (
+        None if ftr_rank0_probe_delta is None
+        else float(ftr_rank0_probe_delta)
+    )
 
     if mode == "current":
         sim["angular_transport_model"] = "current"
@@ -165,6 +183,15 @@ def main():
         default=None,
         help="Rank-2 C2 table path. Defaults to models/C2_table_AR*.json.",
     )
+    parser.add_argument(
+        "--ftr-rank0-probe-delta",
+        type=float,
+        default=None,
+        help=(
+            "Finite-difference probe delta for rank-0 f_tr. "
+            "When set, rank2 correction is disabled in the generated config."
+        ),
+    )
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--workers", type=int, default=5)
     parser.add_argument("--seeds", default=None, help="Comma-separated integer seeds.")
@@ -186,6 +213,7 @@ def main():
         args.mode,
         args.p_eta,
         rank2_correction_enabled=args.rank2_correction_enabled,
+        ftr_rank0_probe_delta=args.ftr_rank0_probe_delta,
     )
     cfg = update_nested(
         base,
@@ -202,6 +230,7 @@ def main():
         dtau=args.dtau,
         rank2_correction_enabled=args.rank2_correction_enabled,
         C2_table=args.C2_table,
+        ftr_rank0_probe_delta=args.ftr_rank0_probe_delta,
     )
 
     out_path = Path(args.config_out)
@@ -217,6 +246,8 @@ def main():
         print(f"  vss_table={args.vss_table}")
     if args.rank2_correction_enabled:
         print(f"  C2_table={cfg['simulation']['C2_table_file']}")
+    if args.ftr_rank0_probe_delta is not None:
+        print(f"  ftr_rank0_probe_delta={args.ftr_rank0_probe_delta:g}")
     print(f"  output_root={output_root}")
 
 

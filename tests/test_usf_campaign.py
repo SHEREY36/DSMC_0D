@@ -124,6 +124,29 @@ def test_campaign_config_can_enable_rank2_C2_table():
     assert cfg["simulation"]["C2_table_file"] == "models/C2_table_AR20.json"
 
 
+def test_campaign_config_probe_delta_disables_rank2_C2():
+    cfg = update_nested(
+        _base_config(),
+        AR=2.0,
+        mode="vss_rank2",
+        p_eta=None,
+        output_root="runs/AR2_usf_vss_rank2_probe_m010",
+        workers=5,
+        vss_table="models/vss_alpha_eff_table_AR20_peta060.json",
+        seeds=None,
+        alpha_values=None,
+        t_end=None,
+        dt=None,
+        dtau=None,
+        rank2_correction_enabled=True,
+        C2_table="models/C2_table_AR20.json",
+        ftr_rank0_probe_delta=-0.1,
+    )
+
+    assert cfg["simulation"]["rank2_correction_enabled"] is False
+    assert cfg["simulation"]["ftr_rank0_probe_delta"] == -0.1
+
+
 def test_generated_config_is_yaml_serializable(tmp_path):
     cfg = update_nested(
         _base_config(),

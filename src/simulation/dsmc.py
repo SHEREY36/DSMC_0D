@@ -11,7 +11,11 @@ from .pressure import compute_pij_k, accumulate_pij_c, normalise_pij_c
 from .non_gaussian import NonGaussianDiagnostics
 from .mu_joint import mu_plane_post_relative_with_eps
 from .vss_rank2 import sample_vss_chi
-from .rank2_correction import compute_rank2_a2, apply_rank2_ftr_correction
+from .rank2_correction import (
+    apply_rank0_ftr_probe,
+    apply_rank2_ftr_correction,
+    compute_rank2_a2,
+)
 from src.preprocessing.relaxation import prepare_theta, Zr
 
 
@@ -287,10 +291,15 @@ def run_simulation(config, models, seed, output_path, pressure_path):
         raise ValueError(f"flow.mode must be 'hcs' or 'usf', got {flow_mode!r}")
     if flow_mode == 'usf' and gdot == 0.0:
         print("  Warning: USF mode with gdot=0 is equivalent to HCS.")
+    ftr_rank0_probe_delta = sim_cfg.get('ftr_rank0_probe_delta', None)
+    ftr_rank0_probe_active = ftr_rank0_probe_delta is not None
+    if ftr_rank0_probe_active:
+        ftr_rank0_probe_delta = float(ftr_rank0_probe_delta)
     rank2_correction_active = (
         bool(sim_cfg.get('rank2_correction_enabled', False))
         and flow_mode == 'usf'
         and not sphere_mode
+        and not ftr_rank0_probe_active
     )
     if rank2_correction_active:
         C2_alpha = models.get_C2(alpha, params.AR)
@@ -430,6 +439,7 @@ def run_simulation(config, models, seed, output_path, pressure_path):
               f"vss_alpha_eff={vss_alpha_eff if vss_alpha_eff is not None else 'n/a'}, "
               f"C2={C2_alpha:.6f}, "
               f"rank2_correction={rank2_correction_active}, "
+              f"ftr_rank0_probe_delta={ftr_rank0_probe_delta if ftr_rank0_probe_active else 'n/a'}, "
               f"hcs_rescale={hcs_rescale_temperature}, "
               f"equilibration_time={equilibration_time:.3f}, {flow_str}")
 
@@ -634,14 +644,19 @@ def run_simulation(config, models, seed, output_path, pressure_path):
                                 gamma = gamma * gamma_max * prob_one_hit
 
                             _theta = max(temp_ratio, 1e-10)
-                            C2_step = (
-                                C2_alpha
-                                if rank2_correction_active and not in_equilibration
-                                else 0.0
-                            )
-                            f_tr = apply_rank2_ftr_correction(
-                                C_alpha, _theta, C2=C2_step, a2=rank2_a2_live
-                            )
+                            if ftr_rank0_probe_active and not in_equilibration:
+                                f_tr = apply_rank0_ftr_probe(
+                                    C_alpha, _theta, delta=ftr_rank0_probe_delta
+                                )
+                            else:
+                                C2_step = (
+                                    C2_alpha
+                                    if rank2_correction_active and not in_equilibration
+                                    else 0.0
+                                )
+                                f_tr = apply_rank2_ftr_correction(
+                                    C_alpha, _theta, C2=C2_step, a2=rank2_a2_live
+                                )
 
                             delta_E = gamma * Etotal_i
                             Etrans_f = epsilon_tr_f * Etotal_i - f_tr * delta_E

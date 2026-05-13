@@ -7,6 +7,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.simulation.rank2_correction import (
+    apply_rank0_ftr_probe,
     apply_rank2_ftr_correction,
     build_C2_table,
     compute_rank2_a2,
@@ -57,6 +58,18 @@ def test_apply_rank2_ftr_correction_preserves_old_formula_when_disabled():
         apply_rank2_ftr_correction(1.2, 2.0, C2=0.5, a2=0.25),
         old * (1.0 + 0.5 * 0.25),
     )
+    assert np.isclose(
+        apply_rank2_ftr_correction(1.2, 2.0, C2=-0.5, a2=0.25),
+        old * (1.0 - 0.5 * 0.25),
+    )
+
+
+def test_apply_rank0_ftr_probe_scales_rank0_formula():
+    old = 1.2 * 3.0 * 2.0 / (3.0 * 2.0 + 2.0)
+
+    assert np.isclose(apply_rank0_ftr_probe(1.2, 2.0, delta=0.0), old)
+    assert np.isclose(apply_rank0_ftr_probe(1.2, 2.0, delta=0.1), old * 1.1)
+    assert np.isclose(apply_rank0_ftr_probe(1.2, 2.0, delta=-0.1), old * 0.9)
 
 
 def test_C2_table_loader_interpolates_and_rejects_nonfinite(tmp_path):

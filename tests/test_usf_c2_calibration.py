@@ -41,15 +41,20 @@ def test_infer_C2_from_theta_gap_handles_sign_and_degenerate_cases():
         theta_lammps=1.2,
         a2_steady=0.1,
         C_alpha=0.5,
+        theta_probe=1.05,
+        probe_delta=-0.1,
     )
     assert result["valid"]
-    assert result["C2"] > 0.0
+    assert result["chi"] < 0.0
+    assert result["C2"] < 0.0
 
     zero_gap = infer_C2_from_theta_gap(
         theta_dsmc=1.0,
         theta_lammps=1.0,
         a2_steady=0.1,
         C_alpha=0.5,
+        theta_probe=1.05,
+        probe_delta=-0.1,
     )
     assert zero_gap["valid"]
     assert np.isclose(zero_gap["C2"], 0.0)
@@ -59,10 +64,21 @@ def test_infer_C2_from_theta_gap_handles_sign_and_degenerate_cases():
         theta_lammps=1.2,
         a2_steady=1.0e-20,
         C_alpha=0.5,
+        theta_probe=1.05,
+        probe_delta=-0.1,
     )
     assert not bad["valid"]
     assert bad["status"] == "near_zero_a2"
     assert bad["C2"] == 0.0
+
+    missing_probe = infer_C2_from_theta_gap(
+        theta_dsmc=1.0,
+        theta_lammps=1.2,
+        a2_steady=0.1,
+        C_alpha=0.5,
+    )
+    assert not missing_probe["valid"]
+    assert missing_probe["status"] == "missing_probe_sensitivity"
 
 
 def _write_pressure_file(path, n_density, T_tr, reduced_tensor, n_rows):
@@ -91,9 +107,13 @@ def _write_pressure_file(path, n_density, T_tr, reduced_tensor, n_rows):
 
 def test_build_usf_C2_table_reads_fixture_and_writes_expected_json(tmp_path):
     dsmc_root = tmp_path / "runs" / "AR2_usf_vss_rank2"
+    probe_root = tmp_path / "runs" / "AR2_usf_vss_rank2_probe_m010"
     case_dir = dsmc_root / "alpha_050"
+    probe_case_dir = probe_root / "alpha_050"
     results_dir = case_dir / "results"
+    probe_results_dir = probe_case_dir / "results"
     results_dir.mkdir(parents=True)
+    probe_results_dir.mkdir(parents=True)
 
     config = {
         "particle": {"AR": 2.0, "radius": 0.5, "mass": 1.0},
@@ -110,6 +130,11 @@ def test_build_usf_C2_table_reads_fixture_and_writes_expected_json(tmp_path):
     }
     with open(case_dir / "config.yaml", "w") as f:
         yaml.safe_dump(config, f)
+    probe_config = json.loads(json.dumps(config))
+    probe_config["simulation"]["output_dir"] = str(probe_results_dir)
+    probe_config["simulation"]["ftr_rank0_probe_delta"] = -0.1
+    with open(probe_case_dir / "config.yaml", "w") as f:
+        yaml.safe_dump(probe_config, f)
 
     params = compute_particle_params(config)
     volume = np.prod(config["system"]["domain"])
@@ -133,10 +158,28 @@ def test_build_usf_C2_table_reads_fixture_and_writes_expected_json(tmp_path):
             np.full(20, T_total),
         ])
         np.savetxt(results_dir / f"AR2_COR50_USF_R{realization}.txt", temp_rows)
+        probe_temp_rows = np.column_stack([
+            np.arange(20, dtype=float),
+            0.1 * np.arange(20, dtype=float),
+            np.full(20, 2.1),
+            np.full(20, 1.0),
+            np.full(20, (3.0 * 2.1 + 2.0) / 5.0),
+        ])
+        np.savetxt(
+            probe_results_dir / f"AR2_COR50_USF_R{realization}.txt",
+            probe_temp_rows,
+        )
         _write_pressure_file(
             results_dir / f"AR2_COR50_USF_R{realization}_pressure.txt",
             n_density,
             T_tr,
+            reduced_tensor,
+            20,
+        )
+        _write_pressure_file(
+            probe_results_dir / f"AR2_COR50_USF_R{realization}_pressure.txt",
+            n_density,
+            2.1,
             reduced_tensor,
             20,
         )
@@ -175,17 +218,21 @@ def test_build_usf_C2_table_reads_fixture_and_writes_expected_json(tmp_path):
         lammps_root=lammps_root,
         C_alpha_table_file=C_alpha_path,
         AR=2.0,
+        probe_root=probe_root,
         output_path=output,
         smooth_window=5,
     )
     row = payload["rows"][0]
 
     assert output.exists()
-    assert payload["metadata"]["method"] == "usf_theta_gap_calibration"
+    assert payload["metadata"]["method"] == "usf_theta_gap_measured_sensitivity"
     assert row["valid"]
     assert row["n_dsmc_seeds"] == 2
     assert np.isclose(row["theta_DSMC"], 2.0)
     assert np.isclose(row["theta_LAMMPS"], 2.2)
+    assert np.isclose(row["theta_probe"], 2.1)
+    assert np.isclose(row["probe_delta"], -0.1)
+    assert row["chi_DSMC"] < 0.0
     assert np.isclose(row["a2_steady"], expected_a2)
-    assert row["C2"] > 0.0
+    assert row["C2"] < 0.0
     assert "dsmc_seed_rows" in row

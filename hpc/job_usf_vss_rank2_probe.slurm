@@ -6,31 +6,23 @@
 #SBATCH --cpus-per-task=20
 #SBATCH --mem=48G
 #SBATCH --time=48:00:00
-#SBATCH -J dsmc_usf_vss_C2
+#SBATCH -J dsmc_usf_vss_probe
 #SBATCH -o logs/%x_%j.out
 #SBATCH -e logs/%x_%j.err
 
 # ============================================================
-# DSMC_0D -- USF sweep with VSS rank-2 transport and C2 correction
+# DSMC_0D -- USF finite-difference f_tr probe sweep
 #
-# Defaults test AR=2.0 with:
-#   VSS_TABLE=models/vss_alpha_eff_table_AR20_peta060.json
-#   C2_TABLE=models/C2_table_AR20.json
+# Default probe:
+#   AR=2.0
+#   FTR_PROBE_DELTA=-0.10
+#   output root=runs/AR2_usf_vss_rank2_probe_m010
 #
-# Submit AR=2 default:
-#   sbatch hpc/job_usf_vss_rank2_C2.slurm
+# Submit:
+#   sbatch hpc/job_usf_vss_rank2_probe.slurm
 #
-# Reuse for other AR values:
-#   sbatch --export=ALL,AR=2.5 hpc/job_usf_vss_rank2_C2.slurm
-#   sbatch --export=ALL,AR=3.0,WORKERS=10 hpc/job_usf_vss_rank2_C2.slurm
-#
-# Useful overrides:
-#   OUTPUT_ROOT=runs/my_sweep
-#   CONFIG_OUT=runs/generated_configs/my_sweep.yaml
-#   VSS_TABLE=models/vss_alpha_eff_table_AR25_peta070.json
-#   C2_TABLE=models/C2_table_AR25.json
-#   ALPHAS=0.50,0.60,0.80
-#   T_END_OVERRIDE=500
+# Reuse:
+#   sbatch --export=ALL,AR=2.5,FTR_PROBE_DELTA=-0.10 hpc/job_usf_vss_rank2_probe.slurm
 # ============================================================
 
 set -euo pipefail
@@ -67,8 +59,10 @@ python --version
 AR="${AR:-2.0}"
 WORKERS="${WORKERS:-20}"
 BASE_CONFIG="${BASE_CONFIG:-config/usf_sweep.yaml}"
+FTR_PROBE_DELTA="${FTR_PROBE_DELTA:--0.10}"
 
 AR_TAG="$(python -c 'from src.simulation.particle import model_ar_tag; import sys; print(model_ar_tag(float(sys.argv[1])))' "${AR}")"
+PROBE_TAG="$(python -c 'from prepare_usf_campaign_config import probe_tag; import sys; print(probe_tag(float(sys.argv[1])))' "${FTR_PROBE_DELTA}")"
 if [[ "${AR_TAG}" == "AR20" ]]; then
   OUTPUT_TAG="AR2"
 else
@@ -83,26 +77,18 @@ if [[ -z "${VSS_TABLE:-}" ]]; then
     AR30) VSS_TABLE="models/vss_alpha_eff_table_AR30_peta070.json" ;;
     *)
       echo "ERROR: No default VSS_TABLE for AR=${AR} (${AR_TAG})."
-      echo "Pass VSS_TABLE=models/vss_alpha_eff_table_${AR_TAG}_*.json"
       exit 1
       ;;
   esac
 fi
 
-C2_TABLE="${C2_TABLE:-models/C2_table_${AR_TAG}.json}"
-CONFIG_OUT="${CONFIG_OUT:-runs/generated_configs/usf_${AR_TAG}_vss_rank2_C2.yaml}"
+CONFIG_OUT="${CONFIG_OUT:-runs/generated_configs/usf_${AR_TAG}_vss_rank2_${PROBE_TAG}.yaml}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-runs/${OUTPUT_TAG}_usf_vss_rank2_${PROBE_TAG}}"
 
 if [[ ! -f "${VSS_TABLE}" ]]; then
   echo "ERROR: VSS_TABLE not found: ${VSS_TABLE}"
   exit 1
 fi
-if [[ ! -f "${C2_TABLE}" ]]; then
-  echo "ERROR: C2_TABLE not found: ${C2_TABLE}"
-  exit 1
-fi
-
-OUTPUT_ROOT="${OUTPUT_ROOT:-runs/${OUTPUT_TAG}_usf_vss_rank2_C2}"
-OUTPUT_ARGS=(--output-root "${OUTPUT_ROOT}")
 
 TIME_ARGS=()
 if [[ -n "${T_END_OVERRIDE:-}" ]]; then
@@ -122,10 +108,9 @@ python prepare_usf_campaign_config.py \
   --AR "${AR}" \
   --mode vss_rank2 \
   --vss-table "${VSS_TABLE}" \
-  --rank2-correction-enabled \
-  --C2-table "${C2_TABLE}" \
+  --ftr-rank0-probe-delta "${FTR_PROBE_DELTA}" \
+  --output-root "${OUTPUT_ROOT}" \
   --workers "${WORKERS}" \
-  "${OUTPUT_ARGS[@]}" \
   "${TIME_ARGS[@]}" \
   "${ALPHA_PREP_ARGS[@]}"
 
