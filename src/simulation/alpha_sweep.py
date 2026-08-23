@@ -6,7 +6,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import yaml
 
 from src.simulation.collision import CollisionModels
-from src.simulation.dsmc import run_simulation
+from src.simulation.dsmc import run_simulation as run_hcs_simulation
+from src.internal.usf.dsmc import run_simulation as run_internal_simulation
 from src.simulation.particle import result_ar_tag
 
 
@@ -243,7 +244,10 @@ def _run_single_seed(task):
 
     os.makedirs(config["simulation"]["output_dir"], exist_ok=True)
     print(f"  [alpha={alpha:.2f} R{realization_idx} seed={seed}] starting...")
-    run_simulation(config, models, seed, output_path, pressure_path)
+    if config.get("flow", {}).get("mode", "hcs") == "usf":
+        run_internal_simulation(config, models, seed, output_path, pressure_path)
+    else:
+        run_hcs_simulation(config, models, seed, output_path, pressure_path)
     return config_path, seed
 
 

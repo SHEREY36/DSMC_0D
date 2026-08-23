@@ -5,7 +5,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from diagnose_stress_transport_weight import (
+from scripts.archive.tools.diagnose_stress_transport_weight import (
     compute_case,
     lambda2_dsmc_hs,
     p2,

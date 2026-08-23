@@ -41,7 +41,7 @@ submit_chunk() {
 }
 
 mkdir -p "${OUTPUT_ROOT}"
-python run_hcs_ng_realization.py \
+python -m scripts.internal.run_hcs_ng_realization \
   --output-root "${OUTPUT_ROOT}" \
   --write-manifest-only
 

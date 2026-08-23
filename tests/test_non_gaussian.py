@@ -118,6 +118,47 @@ def test_diagnostics_sample_scheduled_tau_window(tmp_path):
     assert summary["sampling_complete"] is True
 
 
+def test_diagnostics_sample_scheduled_physical_time_crossings(tmp_path):
+    rng = np.random.default_rng(456)
+    Np = 500
+    mass = 1.0
+    Ttrans = 1.0
+    Trot = 1.0
+    vel = rng.normal(0.0, np.sqrt(Ttrans / mass), size=(Np, 3))
+    Er = rng.exponential(Trot, size=Np)
+    Er *= Trot / np.mean(Er)
+    config = {
+        "diagnostics": {
+            "non_gaussian": {
+                "enabled": True,
+                "sample_axis": "t",
+                "sample_start_t": 150.0,
+                "sample_end_t": 400.0,
+                "sample_delta_t": 25.0,
+                "hist_speed_bins": 40,
+                "hist_rot_speed_bins": 40,
+                "hist_energy_tr_bins": 40,
+                "hist_energy_rot_bins": 40,
+                "hist_energy_coupling_bins": 40,
+            }
+        }
+    }
+    diag = NonGaussianDiagnostics(
+        config, str(tmp_path / "case.txt"), seed=8, Np=Np, sphere_mode=False,
+        flow_mode="hcs", mass=mass, mI=1.0, t_end=405.0
+    )
+    times = [149.999999] + [150.0 + 25.0 * idx + 1.0e-8 for idx in range(11)]
+    for idx, t in enumerate(times):
+        diag.maybe_sample(t, float(idx), idx, vel, Er, Ttrans, Trot)
+    diag.close(final_NColl=1500, final_tau=3.0, final_t=405.0)
+
+    summary = json.loads((tmp_path / "case_ng_summary.json").read_text())
+    assert summary["sample_axis"] == "t"
+    assert summary["expected_output_samples"] == 11
+    assert summary["n_output_samples"] == 11
+    assert summary["sampling_complete"] is True
+
+
 def test_maxwell_energy_coupling_reference_integrates_to_one():
     x = np.linspace(0.0, 80.0, 20000)
     integral = np.trapezoid(maxwell_energy_coupling_pdf(x), x)

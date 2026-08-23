@@ -97,7 +97,7 @@ if [[ "${HCS_RESCALE:-1}" == "0" ]]; then
   EXTRA_ARGS+=(--no-hcs-rescale)
 fi
 
-python run_hcs_ng_sweep.py \
+python -m scripts.internal.run_hcs_ng_sweep \
   --config "${CONFIG}" \
   --workers "${WORKERS}" \
   "${EXTRA_ARGS[@]}"

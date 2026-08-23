@@ -75,17 +75,17 @@ ALPHA_INT=$(python -c "print(f'{round(float(\"${ALPHA}\")*100):03d}')")
 echo "Task ${SLURM_ARRAY_TASK_ID}: AR=${AR}, alpha=${ALPHA}"
 
 # NOTE: Before submitting this job array, run once on the login node:
-#   python extract_theta_target.py --config config/default.yaml --AR ${AR}
+#   python -m scripts.calibration.extract_theta_target --config config/default.yaml --AR ${AR}
 # This pre-extracts theta* values from LAMMPS data into:
-#   models/theta_target_table_AR${AR_INT}.json
-THETA_TABLE="models/theta_target_table_AR${AR_INT}.json"
+#   models/targets/theta_target_table_AR${AR_INT}.json
+THETA_TABLE="models/targets/theta_target_table_AR${AR_INT}.json"
 
 # Each task writes to its own JSON to avoid race conditions.
 # merge_C_alpha_results.py --AR ${AR} combines them afterward.
 OUT_FILE="runs/calib_C_alpha/C_alpha_AR${AR_INT}_${ALPHA_INT}.json"
 TMP_DIR="runs/calib_C_alpha/tmp_AR${AR_INT}_${ALPHA_INT}"
 
-python calibrate_C_alpha.py \
+python -m scripts.calibration.calibrate_C_alpha \
     --config      config/default.yaml \
     --AR          "${AR}" \
     --alphas      "${ALPHA}" \

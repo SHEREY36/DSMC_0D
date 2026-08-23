@@ -62,7 +62,7 @@ BASE_CONFIG="${BASE_CONFIG:-config/usf_sweep.yaml}"
 FTR_PROBE_DELTA="${FTR_PROBE_DELTA:--0.10}"
 
 AR_TAG="$(python -c 'from src.simulation.particle import model_ar_tag; import sys; print(model_ar_tag(float(sys.argv[1])))' "${AR}")"
-PROBE_TAG="$(python -c 'from prepare_usf_campaign_config import probe_tag; import sys; print(probe_tag(float(sys.argv[1])))' "${FTR_PROBE_DELTA}")"
+PROBE_TAG="$(python -c 'from scripts.internal.prepare_usf_campaign_config import probe_tag; import sys; print(probe_tag(float(sys.argv[1])))' "${FTR_PROBE_DELTA}")"
 if [[ "${AR_TAG}" == "AR20" ]]; then
   OUTPUT_TAG="AR2"
 else
@@ -71,10 +71,10 @@ fi
 
 if [[ -z "${VSS_TABLE:-}" ]]; then
   case "${AR_TAG}" in
-    AR15) VSS_TABLE="models/vss_alpha_eff_table_AR15_peta090.json" ;;
-    AR20) VSS_TABLE="models/vss_alpha_eff_table_AR20_peta060.json" ;;
-    AR25) VSS_TABLE="models/vss_alpha_eff_table_AR25_peta070.json" ;;
-    AR30) VSS_TABLE="models/vss_alpha_eff_table_AR30_peta070.json" ;;
+    AR15) VSS_TABLE="models/angular_transport/vss_alpha_eff_table_AR15_peta090.json" ;;
+    AR20) VSS_TABLE="models/angular_transport/vss_alpha_eff_table_AR20_peta060.json" ;;
+    AR25) VSS_TABLE="models/angular_transport/vss_alpha_eff_table_AR25_peta070.json" ;;
+    AR30) VSS_TABLE="models/angular_transport/vss_alpha_eff_table_AR30_peta070.json" ;;
     *)
       echo "ERROR: No default VSS_TABLE for AR=${AR} (${AR_TAG})."
       exit 1
@@ -102,7 +102,7 @@ if [[ -n "${ALPHAS:-}" ]]; then
   ALPHA_RUN_ARGS=(--alphas "${ALPHAS}")
 fi
 
-python prepare_usf_campaign_config.py \
+python -m scripts.internal.prepare_usf_campaign_config \
   --base-config "${BASE_CONFIG}" \
   --config-out "${CONFIG_OUT}" \
   --AR "${AR}" \
@@ -114,7 +114,7 @@ python prepare_usf_campaign_config.py \
   "${TIME_ARGS[@]}" \
   "${ALPHA_PREP_ARGS[@]}"
 
-python run_alpha_sweep.py \
+python -m scripts.public.run_alpha_sweep \
   --config "${CONFIG_OUT}" \
   --workers "${WORKERS}" \
   --skip-post \

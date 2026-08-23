@@ -52,6 +52,29 @@ class CollisionModels:
             C2_path
         )
 
+    def _artifact_path(self, path_or_name, *categories):
+        """Resolve an artifact from the categorized model tree.
+
+        Existing explicit paths win.  During the cleanup transition, configs may
+        still point at the old flat ``models/foo`` layout; in that case resolve
+        by basename inside the requested category directories.
+        """
+        if not path_or_name:
+            return path_or_name
+        if os.path.exists(path_or_name):
+            return path_or_name
+
+        basename = os.path.basename(path_or_name)
+        for category in categories:
+            candidate = os.path.join(self.model_dir, category, basename)
+            if os.path.exists(candidate):
+                return candidate
+
+        candidate = os.path.join(self.model_dir, basename)
+        if os.path.exists(candidate):
+            return candidate
+        return path_or_name
+
     def _load_all(self, gmm_npz_path, ftr_params_path, zr_eff_path, c_alpha_path,
                   stress_transport_path, ctc_angular_path, vss_alpha_eff_path,
                   C2_path):
@@ -59,7 +82,8 @@ class CollisionModels:
         # Conditional GMM (from pre-computed .npz)
         if gmm_npz_path is None:
             candidates = sorted(
-                glob.glob(os.path.join(self.model_dir, "gmm_cond_*.npz"))
+                glob.glob(os.path.join(self.model_dir, "exchange_gmm", "gmm_cond_*.npz"))
+                + glob.glob(os.path.join(self.model_dir, "gmm_cond_*.npz"))
             )
             if not candidates:
                 raise FileNotFoundError(
@@ -67,12 +91,17 @@ class CollisionModels:
                 )
             gmm_npz_path = candidates[0]
             print(f"  Auto-detected GMM: {gmm_npz_path}")
+        else:
+            gmm_npz_path = self._artifact_path(gmm_npz_path, "exchange_gmm")
 
         self.cond_gmm = ConditionalGMM(gmm_npz_path)
 
         # Scattering angle polynomials
         scat = np.load(
-            os.path.join(self.model_dir, "scattering_coeffs.npz")
+            self._artifact_path(
+                os.path.join(self.model_dir, "scattering_coeffs.npz"),
+                "angular_transport",
+            )
         )
         self.a_elastic = scat['a_elastic']
         self.a_inelastic = scat['a_inelastic']
@@ -83,20 +112,29 @@ class CollisionModels:
 
         # Lookup tables
         self.gamma_max_table = load_table(
-            os.path.join(self.model_dir, "gamma_max_table.json")
+            self._artifact_path(
+                os.path.join(self.model_dir, "gamma_max_table.json"),
+                "dissipation",
+            )
         )
         self.one_hit_table = load_table(
-            os.path.join(self.model_dir, "one_hit_table.json")
+            self._artifact_path(
+                os.path.join(self.model_dir, "one_hit_table.json"),
+                "dissipation",
+            )
         )
 
         # f_tr Laplace parameters (optional — graceful fallback if not found)
         if ftr_params_path is None:
             candidates = sorted(
-                glob.glob(os.path.join(self.model_dir, "ftr_params_*.json"))
+                glob.glob(os.path.join(self.model_dir, "archive", "ftr_params_*.json"))
+                + glob.glob(os.path.join(self.model_dir, "ftr_params_*.json"))
             )
             ftr_params_path = candidates[0] if candidates else None
             if ftr_params_path:
                 print(f"  Auto-detected f_tr table: {ftr_params_path}")
+        else:
+            ftr_params_path = self._artifact_path(ftr_params_path, "archive")
 
         if ftr_params_path and os.path.exists(ftr_params_path):
             self.ftr_table = load_ftr_table(ftr_params_path)
@@ -107,6 +145,7 @@ class CollisionModels:
                       f"f_tr sampling disabled (f_tr=0).")
 
         # Z_R_eff table (optional; load only when explicitly requested)
+        zr_eff_path = self._artifact_path(zr_eff_path, "targets")
         if zr_eff_path and os.path.exists(zr_eff_path):
             self.zr_eff_table = load_zr_eff_table(zr_eff_path)
             print(f"  Loaded Z_R_eff table: {zr_eff_path}")
@@ -115,7 +154,11 @@ class CollisionModels:
 
         # C_alpha calibration table (optional)
         if c_alpha_path is None:
-            c_alpha_path = os.path.join(self.model_dir, "C_alpha_table_AR20.json")
+            c_alpha_path = os.path.join(
+                self.model_dir, "relaxation", "C_alpha_table_AR20.json"
+            )
+        else:
+            c_alpha_path = self._artifact_path(c_alpha_path, "relaxation")
         if os.path.exists(c_alpha_path):
             self.C_alpha_table = load_table(c_alpha_path)
             print(f"  Loaded C_alpha table: {c_alpha_path}")
@@ -123,6 +166,7 @@ class CollisionModels:
             self.C_alpha_table = None
 
         # Rank-2 stress-transport weights (optional)
+        stress_transport_path = self._artifact_path(stress_transport_path, "archive")
         if stress_transport_path and os.path.exists(stress_transport_path):
             self.stress_transport_table = load_stress_transport_weights(
                 stress_transport_path
@@ -137,6 +181,7 @@ class CollisionModels:
                 )
 
         # CTC-conditioned angular endpoint sampler (optional)
+        ctc_angular_path = self._artifact_path(ctc_angular_path, "archive")
         if ctc_angular_path and os.path.exists(ctc_angular_path):
             self.ctc_angular_model = CTCAngularModel(ctc_angular_path)
             print(f"  Loaded CTC angular model: {ctc_angular_path}")
@@ -149,6 +194,9 @@ class CollisionModels:
                 )
 
         # VSS rank-2 alpha_eff table (optional)
+        vss_alpha_eff_path = self._artifact_path(
+            vss_alpha_eff_path, "angular_transport"
+        )
         if vss_alpha_eff_path and os.path.exists(vss_alpha_eff_path):
             self.vss_alpha_eff_table = load_vss_alpha_eff_table(
                 vss_alpha_eff_path
@@ -163,6 +211,7 @@ class CollisionModels:
                 )
 
         # Rank-2 C2 energy-routing correction table (optional)
+        C2_path = self._artifact_path(C2_path, "relaxation")
         if C2_path and os.path.exists(C2_path):
             self.C2_table = load_C2_table(C2_path)
             print(f"  Loaded C2 table: {C2_path}")
@@ -175,7 +224,10 @@ class CollisionModels:
                 )
 
         # Conditional chi Beta model (optional — falls back to marginal rejection sampler)
-        mu_chi_path = os.path.join(self.model_dir, "mu_chi_beta_coeffs.npz")
+        mu_chi_path = self._artifact_path(
+            os.path.join(self.model_dir, "mu_chi_beta_coeffs.npz"),
+            "archive",
+        )
         if os.path.exists(mu_chi_path):
             self.mu_chi_model = load_mu_chi_model(mu_chi_path)
             print(f"  Loaded mu-chi Beta model: {mu_chi_path}")
@@ -183,7 +235,10 @@ class CollisionModels:
             self.mu_chi_model = None
 
         # Azimuthal eps von Mises model (optional — falls back to eps=0 in-plane)
-        eps_path = os.path.join(self.model_dir, "eps_azimuth_coeffs.npz")
+        eps_path = self._artifact_path(
+            os.path.join(self.model_dir, "eps_azimuth_coeffs.npz"),
+            "archive",
+        )
         result = load_eps_model(eps_path)
         if result is not None:
             self.eps_model = result

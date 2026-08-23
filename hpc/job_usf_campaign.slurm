@@ -25,7 +25,7 @@
 # Examples:
 #   sbatch --export=ALL,AR=1.5,MODE=current hpc/job_usf_campaign.slurm
 #   sbatch --export=ALL,AR=2.5,MODE=stress_weight,PETA=0.60 hpc/job_usf_campaign.slurm
-#   sbatch --export=ALL,AR=3.0,MODE=vss_rank2,VSS_TABLE=models/vss_alpha_eff_table_AR30_peta060.json hpc/job_usf_campaign.slurm
+#   sbatch --export=ALL,AR=3.0,MODE=vss_rank2,VSS_TABLE=models/angular_transport/vss_alpha_eff_table_AR30_peta060.json hpc/job_usf_campaign.slurm
 # ============================================================
 
 set -euo pipefail
@@ -88,7 +88,7 @@ if [[ -n "${OUTPUT_ROOT:-}" ]]; then
   OUTPUT_ARGS=(--output-root "${OUTPUT_ROOT}")
 fi
 
-python prepare_usf_campaign_config.py \
+python -m scripts.internal.prepare_usf_campaign_config \
   --base-config "${BASE_CONFIG}" \
   --config-out "${CONFIG_OUT}" \
   --AR "${AR}" \
@@ -98,7 +98,7 @@ python prepare_usf_campaign_config.py \
   "${VSS_ARGS[@]}" \
   "${OUTPUT_ARGS[@]}"
 
-python run_alpha_sweep.py \
+python -m scripts.public.run_alpha_sweep \
   --config "${CONFIG_OUT}" \
   --workers "${WORKERS}" \
   --skip-post

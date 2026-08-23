@@ -1,0 +1,45 @@
+particle:
+  AR: 2.0
+  radius: 0.5
+  mass: 1.0
+  sigma_c_scale: 1.020
+
+system:
+  kTt: 1.0
+  kTr: 1.0
+  alpha: 0.95
+  eta: 1.0
+  phi: 0.01
+  domain: [100, 100, 100]
+  C_alpha: null
+
+time:
+  dt: 0.01
+  dtau: 0.1
+  t_end: 200
+  tau_end: null
+  equilibration_time: 0.0
+
+flow:
+  mode: hcs
+  shear_rate: 0.0
+
+simulation:
+  seeds: [42]
+  output_dir: results/release_hcs/
+  sphere_collision: false
+  use_isotropic_eps: true
+  hcs_rescale_temperature: false
+  hcs_rescale_reference: initial
+
+preprocessing:
+  gmm:
+    gmm_cond_file: models/exchange_gmm/gmm_cond_AR20.npz
+  dissipation:
+    beta_a: 1.21
+    beta_b: 3.67
+  model_output_dir: models/
+
+calibration:
+  C_alpha_table_file: models/relaxation/C_alpha_table_AR20.json
+  theta_target_table_file: models/targets/theta_target_table_AR20.json

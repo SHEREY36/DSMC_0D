@@ -61,7 +61,7 @@ python --version
 
 WORKERS="${WORKERS:-20}"
 
-python run_alpha_sweep.py \
+python -m scripts.public.run_alpha_sweep \
     --config config/usf_sweep_peta025.yaml \
     --workers "${WORKERS}" \
     --skip-post

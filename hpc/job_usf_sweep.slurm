@@ -58,7 +58,7 @@ echo "Using python: $(command -v python)"
 python --version
 
 # Run the USF sweep — 20 workers = 10 alphas × 2 seeds simultaneously
-python run_alpha_sweep.py \
+python -m scripts.public.run_alpha_sweep \
     --config config/usf_sweep.yaml \
     --workers 20 \
     --skip-post

@@ -12,7 +12,7 @@ Options:
     --results-dir   Directory containing C_alpha_AR*_*.json files
                     (default: runs/calib_C_alpha)
     --output        Destination table file. Default derived from --AR:
-                    models/C_alpha_table_AR{ar_int}.json
+                    models/relaxation/C_alpha_table_AR{ar_int}.json
     --dry-run       Print what would be merged without writing
 """
 import argparse
@@ -33,7 +33,7 @@ def main():
     )
     parser.add_argument(
         "--output", default=None,
-        help="Output table path. Default: models/C_alpha_table_AR{ar_int}.json"
+        help="Output table path. Default: models/relaxation/C_alpha_table_AR{ar_int}.json"
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -42,7 +42,7 @@ def main():
     args = parser.parse_args()
 
     ar_int = int(round(args.AR * 10))
-    output_path = args.output or f"models/C_alpha_table_AR{ar_int:02d}.json"
+    output_path = args.output or f"models/relaxation/C_alpha_table_AR{ar_int:02d}.json"
     pattern = os.path.join(args.results_dir, f"C_alpha_AR{ar_int:02d}_*.json")
 
     # Load existing table (if any) as base — preserves entries not re-calibrated

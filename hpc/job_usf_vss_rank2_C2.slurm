@@ -14,8 +14,8 @@
 # DSMC_0D -- USF sweep with VSS rank-2 transport and C2 correction
 #
 # Defaults test AR=2.0 with:
-#   VSS_TABLE=models/vss_alpha_eff_table_AR20_peta060.json
-#   C2_TABLE=models/C2_table_AR20.json
+#   VSS_TABLE=models/angular_transport/vss_alpha_eff_table_AR20_peta060.json
+#   C2_TABLE=models/relaxation/C2_table_AR20.json
 #
 # Submit AR=2 default:
 #   sbatch hpc/job_usf_vss_rank2_C2.slurm
@@ -27,8 +27,8 @@
 # Useful overrides:
 #   OUTPUT_ROOT=runs/my_sweep
 #   CONFIG_OUT=runs/generated_configs/my_sweep.yaml
-#   VSS_TABLE=models/vss_alpha_eff_table_AR25_peta070.json
-#   C2_TABLE=models/C2_table_AR25.json
+#   VSS_TABLE=models/angular_transport/vss_alpha_eff_table_AR25_peta070.json
+#   C2_TABLE=models/relaxation/C2_table_AR25.json
 #   ALPHAS=0.50,0.60,0.80
 #   T_END_OVERRIDE=500
 # ============================================================
@@ -77,19 +77,19 @@ fi
 
 if [[ -z "${VSS_TABLE:-}" ]]; then
   case "${AR_TAG}" in
-    AR15) VSS_TABLE="models/vss_alpha_eff_table_AR15_peta090.json" ;;
-    AR20) VSS_TABLE="models/vss_alpha_eff_table_AR20_peta060.json" ;;
-    AR25) VSS_TABLE="models/vss_alpha_eff_table_AR25_peta070.json" ;;
-    AR30) VSS_TABLE="models/vss_alpha_eff_table_AR30_peta070.json" ;;
+    AR15) VSS_TABLE="models/angular_transport/vss_alpha_eff_table_AR15_peta090.json" ;;
+    AR20) VSS_TABLE="models/angular_transport/vss_alpha_eff_table_AR20_peta060.json" ;;
+    AR25) VSS_TABLE="models/angular_transport/vss_alpha_eff_table_AR25_peta070.json" ;;
+    AR30) VSS_TABLE="models/angular_transport/vss_alpha_eff_table_AR30_peta070.json" ;;
     *)
       echo "ERROR: No default VSS_TABLE for AR=${AR} (${AR_TAG})."
-      echo "Pass VSS_TABLE=models/vss_alpha_eff_table_${AR_TAG}_*.json"
+      echo "Pass VSS_TABLE=models/angular_transport/vss_alpha_eff_table_${AR_TAG}_*.json"
       exit 1
       ;;
   esac
 fi
 
-C2_TABLE="${C2_TABLE:-models/C2_table_${AR_TAG}.json}"
+C2_TABLE="${C2_TABLE:-models/relaxation/C2_table_${AR_TAG}.json}"
 CONFIG_OUT="${CONFIG_OUT:-runs/generated_configs/usf_${AR_TAG}_vss_rank2_C2.yaml}"
 
 if [[ ! -f "${VSS_TABLE}" ]]; then
@@ -116,7 +116,7 @@ if [[ -n "${ALPHAS:-}" ]]; then
   ALPHA_RUN_ARGS=(--alphas "${ALPHAS}")
 fi
 
-python prepare_usf_campaign_config.py \
+python -m scripts.internal.prepare_usf_campaign_config \
   --base-config "${BASE_CONFIG}" \
   --config-out "${CONFIG_OUT}" \
   --AR "${AR}" \
@@ -129,7 +129,7 @@ python prepare_usf_campaign_config.py \
   "${TIME_ARGS[@]}" \
   "${ALPHA_PREP_ARGS[@]}"
 
-python run_alpha_sweep.py \
+python -m scripts.public.run_alpha_sweep \
   --config "${CONFIG_OUT}" \
   --workers "${WORKERS}" \
   --skip-post \

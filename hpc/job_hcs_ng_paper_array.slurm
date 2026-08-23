@@ -101,7 +101,7 @@ python --version
 
 ARS=(1.0 1.1 1.5 2.0 2.5 3.0)
 ALPHAS=(0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95)
-read -r -a SEEDS <<< "$(python run_hcs_ng_realization.py --print-seeds)"
+read -r -a SEEDS <<< "$(python -m scripts.internal.run_hcs_ng_realization --print-seeds)"
 
 N_ALPHA="${#ALPHAS[@]}"
 N_SEED="${#SEEDS[@]}"
@@ -160,7 +160,7 @@ if [[ -n "${MEMORY_DIAGNOSTICS_INTERVAL_STEPS:-}" ]]; then
   EXTRA_ARGS+=(--memory-diagnostics-interval-steps "${MEMORY_DIAGNOSTICS_INTERVAL_STEPS}")
 fi
 
-python -u run_hcs_ng_realization.py \
+python -u -m scripts.internal.run_hcs_ng_realization \
   --config "${CONFIG}" \
   --AR "${AR}" \
   --alpha "${ALPHA}" \

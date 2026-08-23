@@ -29,13 +29,13 @@ The fastest way to run one specific (AR, alpha) case is to set the parameters di
 
 ```bash
 # Edit config/default.yaml: set particle.AR, system.alpha, simulation.seeds
-python run_simulation.py
+python -m scripts.public.run_simulation
 ```
 
 Or pass any modified config file:
 
 ```bash
-python run_simulation.py --config config/default.yaml
+python -m scripts.public.run_simulation --config config/default.yaml
 ```
 
 **Key parameters to set for a single case:**
@@ -101,13 +101,13 @@ A velocity shear gradient `dVx/dy = gdot` is applied each timestep. Translationa
 
 ```bash
 # Edit config/default.yaml to set AR, alpha, seeds, output_dir, gmm_cond_file
-python run_simulation.py --config config/default.yaml
+python -m scripts.public.run_simulation --config config/default.yaml
 ```
 
 ### 2. Post-process a single simulation
 
 ```bash
-python run_postprocessing.py --config config/default.yaml
+python -m scripts.public.run_postprocessing --config config/default.yaml
 ```
 
 Generates three plots in `postprocessing.figures_dir`:
@@ -121,19 +121,19 @@ Prepares per-alpha case folders under `calibration_sweep.output_root` (default: 
 
 ```bash
 # Step 1: Create case folders and per-case config.yaml files (no simulation yet)
-python run_alpha_sweep.py --config config/default.yaml --prepare-only
+python -m scripts.public.run_alpha_sweep --config config/default.yaml --prepare-only
 
 # Step 2: Run all alpha cases
-python run_alpha_sweep.py --config config/default.yaml
+python -m scripts.public.run_alpha_sweep --config config/default.yaml
 
 # Step 3: Run a specific subset of alpha values
-python run_alpha_sweep.py --config config/default.yaml --alphas 0.80,0.85,0.90
+python -m scripts.public.run_alpha_sweep --config config/default.yaml --alphas 0.80,0.85,0.90
 
 # Step 4: Run with parallel workers
-python run_alpha_sweep.py --config config/default.yaml --workers 4
+python -m scripts.public.run_alpha_sweep --config config/default.yaml --workers 4
 
 # Step 5: Run without generating sweep plots afterwards
-python run_alpha_sweep.py --config config/default.yaml --skip-post
+python -m scripts.public.run_alpha_sweep --config config/default.yaml --skip-post
 ```
 
 Sweep folder structure:
@@ -156,23 +156,23 @@ Sweep post-processing produces (in `postprocessing.sweep_figures_dir`):
 
 ```bash
 # Uses sweep_root from config
-python run_postprocessing.py --config config/default.yaml
+python -m scripts.public.run_postprocessing --config config/default.yaml
 
 # Override sweep folder
-python run_postprocessing.py --config config/default.yaml \
+python -m scripts.public.run_postprocessing --config config/default.yaml \
     --sweep-root runs/AR2_eta_sweep
 
 # Filter to specific alphas
-python run_postprocessing.py --config config/default.yaml \
+python -m scripts.public.run_postprocessing --config config/default.yaml \
     --alphas 0.65,0.70,0.75,0.80
 
 # Exclude low alphas, require at least 3 realizations
-python run_postprocessing.py --config config/default.yaml \
+python -m scripts.public.run_postprocessing --config config/default.yaml \
     --exclude-alphas 0.50,0.55,0.60 \
     --min-realizations 3
 
 # Save figures to a different directory
-python run_postprocessing.py --config config/default.yaml \
+python -m scripts.public.run_postprocessing --config config/default.yaml \
     --figures-dir runs/AR2_eta_sweep/my_figures
 ```
 
@@ -182,30 +182,30 @@ python run_postprocessing.py --config config/default.yaml \
 
 ```bash
 # Serial (default): calibrates all alpha values, saves incrementally
-python calibrate_C_alpha.py --config config/default.yaml
+python -m scripts.calibration.calibrate_C_alpha --config config/default.yaml
 
 # Calibrate only specific alpha values
-python calibrate_C_alpha.py --config config/default.yaml --alphas 0.80,0.85,0.90
+python -m scripts.calibration.calibrate_C_alpha --config config/default.yaml --alphas 0.80,0.85,0.90
 
 # Parallel: 4 alpha values simultaneously
-python calibrate_C_alpha.py --config config/default.yaml --workers 4
+python -m scripts.calibration.calibrate_C_alpha --config config/default.yaml --workers 4
 
 # Override AR (default: from config)
-python calibrate_C_alpha.py --config config/default.yaml --AR 2.0
+python -m scripts.calibration.calibrate_C_alpha --config config/default.yaml --AR 2.0
 
 # Force re-calibration even if already in table
-python calibrate_C_alpha.py --config config/default.yaml --force
+python -m scripts.calibration.calibrate_C_alpha --config config/default.yaml --force
 
 # Adjust convergence tolerance and iteration limit
-python calibrate_C_alpha.py --config config/default.yaml --tol 5e-4 --max-iter 25
+python -m scripts.calibration.calibrate_C_alpha --config config/default.yaml --tol 5e-4 --max-iter 25
 ```
 
-Output: `models/C_alpha_table_AR20.json`. Intermediate DSMC runs are saved in `runs/calib_C_alpha/`.
+Output: `models/relaxation/C_alpha_table_AR20.json`. Intermediate DSMC runs are saved in `runs/calib_C_alpha/`.
 
 ### 6. Validate calibration against LAMMPS
 
 ```bash
-python validate_C_alpha.py
+python -m scripts.internal.validation.validate_C_alpha
 ```
 
 Generates `figures/validation_C_alpha_AR2.png` — a three-panel comparison (collision frequency, temperature ratio `theta`, normalised total temperature) between DSMC and LAMMPS for all calibrated alpha values.
@@ -215,7 +215,7 @@ Generates `figures/validation_C_alpha_AR2.png` — a three-panel comparison (col
 Only needed if you have new CTC data. Computationally expensive.
 
 ```bash
-python run_preprocessing.py --config config/default.yaml
+python -m scripts.public.run_preprocessing --config config/default.yaml
 ```
 
 Fits and saves to `models/`:
@@ -233,8 +233,8 @@ To run a case without touching `config/default.yaml`:
 ```bash
 cp config/default.yaml runs/my_case/config.yaml
 # Edit runs/my_case/config.yaml
-python run_simulation.py --config runs/my_case/config.yaml
-python run_postprocessing.py --config runs/my_case/config.yaml
+python -m scripts.public.run_simulation --config runs/my_case/config.yaml
+python -m scripts.public.run_postprocessing --config runs/my_case/config.yaml
 ```
 
 Key sections to edit:
@@ -341,12 +341,10 @@ DSMC_0D/
 ├── CTC_data/                     # DEM collision trajectory data
 ├── LAMMPS_data/                  # LAMMPS HCS reference data (for calibration)
 ├── results/                      # Default simulation output
-├── run_simulation.py             # Entry point: run DSMC
-├── run_alpha_sweep.py            # Entry point: alpha sweep
-├── run_postprocessing.py         # Entry point: analyze and plot
-├── run_preprocessing.py          # Entry point: fit models from CTC data
-├── calibrate_C_alpha.py          # Calibrate C(alpha) against LAMMPS reference
-└── validate_C_alpha.py           # Validation plots: DSMC vs LAMMPS
+├── scripts/public/               # Reviewer-facing command-line entry points
+├── scripts/calibration/          # Calibration table builders
+├── scripts/internal/             # Internal USF/campaign/validation tools
+└── scripts/archive/              # Deprecated exploratory tools and configs
 ```
 
 ---

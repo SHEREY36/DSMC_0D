@@ -51,7 +51,7 @@ echo "Using python: ${PYTHON_CMD}"
 python --version
 
 # Option A: run all active alphas from config/default.yaml
-"${PYTHON_CMD}" run_alpha_sweep.py --config config/default.yaml --workers 8
+"${PYTHON_CMD}" -m scripts.public.run_alpha_sweep --config config/default.yaml --workers 8
 
 # Option B: run only selected alphas (example)
-# "${PYTHON_CMD}" run_alpha_sweep.py --config config/default.yaml --workers 8 --alphas 0.8,0.85,1.0
+# "${PYTHON_CMD}" -m scripts.public.run_alpha_sweep --config config/default.yaml --workers 8 --alphas 0.8,0.85,1.0

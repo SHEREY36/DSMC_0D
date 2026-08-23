@@ -58,7 +58,7 @@ echo "Using python: $(command -v python)"
 python --version
 
 # Run the sphere USF sweep — 20 workers = ~20 simultaneous (alpha,seed) pairs
-python run_alpha_sweep.py \
+python -m scripts.public.run_alpha_sweep \
     --config config/sphere_usf_sweep.yaml \
     --workers 20 \
     --skip-post

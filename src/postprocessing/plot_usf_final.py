@@ -7,17 +7,23 @@ Produces three figures:
   3. temperature_ratio.png   — theta* = T_trans/T_rot vs alpha
 
 Usage (from project root):
-    python run_usf_final_plots.py
+    python -m scripts.internal.plots.run_usf_final_plots
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import math
+import os
 import sys
+import tempfile
 from itertools import groupby
 from operator import itemgetter
 from pathlib import Path
+
+os.environ.setdefault(
+    "MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "matplotlib")
+)
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -1613,9 +1619,15 @@ def main():
     lmp_sphcyl = load_lammps_sphcyl(Path(args.lammps_sphcyl))
     print(f"  {len(lmp_sphcyl)} cases: e = {[r['e'] for r in lmp_sphcyl]}")
 
-    print("Loading LAMMPS sphere data...")
-    lmp_spheres = load_lammps_spheres(Path(args.lammps_spheres))
-    print(f"  {len(lmp_spheres)} cases: e = {[r['e'] for r in lmp_spheres]}")
+    lmp_spheres = []
+    if args.lammps_spheres:
+        lmp_sphere_dir = Path(args.lammps_spheres)
+        if lmp_sphere_dir.exists():
+            print("Loading LAMMPS sphere data...")
+            lmp_spheres = load_lammps_spheres(lmp_sphere_dir)
+            print(f"  {len(lmp_spheres)} cases: e = {[r['e'] for r in lmp_spheres]}")
+        else:
+            print(f"  LAMMPS spheres dir not found: {lmp_sphere_dir} - skipping.")
 
     print("Computing KT prediction...")
     kt = garzo_dufty_spheres(np.linspace(0.50, 1.00, 200))
@@ -1669,7 +1681,7 @@ def main_nsp():
     sphere data and the KT prediction are the same shared reference.
 
     Usage (from project root):
-        python run_nsp_final_plots.py [--sweeps <dir> [<dir> ...]]
+        python -m scripts.internal.plots.run_nsp_final_plots [--sweeps <dir> [<dir> ...]]
     """
     parser = argparse.ArgumentParser(
         description="NSP DSMC USF overlay plots (same style as 0D sweep)"

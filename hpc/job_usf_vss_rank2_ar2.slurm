@@ -15,7 +15,7 @@
 #
 # Angular model:
 #   simulation.angular_transport_model = vss_rank2
-#   alpha_eff table = models/vss_alpha_eff_table_AR20_peta060.json
+#   alpha_eff table = models/angular_transport/vss_alpha_eff_table_AR20_peta060.json
 #   cos(chi) = 2*R^(1/alpha_eff) - 1, eps uniform in [0, 2*pi)
 #
 # Grid: 10 alpha values x 4 seeds = 40 realizations
@@ -61,7 +61,7 @@ python --version
 
 WORKERS="${WORKERS:-20}"
 
-python run_alpha_sweep.py \
+python -m scripts.public.run_alpha_sweep \
     --config config/usf_sweep_vss_rank2.yaml \
     --workers "${WORKERS}" \
     --skip-post

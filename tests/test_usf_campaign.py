@@ -5,7 +5,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prepare_usf_campaign_config import update_nested
+from scripts.internal.prepare_usf_campaign_config import update_nested
 from src.simulation.particle import model_ar_tag, result_ar_tag
 
 
@@ -30,8 +30,8 @@ def _base_config():
         "preprocessing": {
             "model_output_dir": "models/",
             "gmm": {},
-            "ftr": {"ftr_params_file": "models/ftr_params_AR20_r100.json"},
-            "zr_eff": {"zr_eff_table_file": "models/zr_eff_table_AR20.json"},
+            "ftr": {"ftr_params_file": "models/archive/ftr_params_AR20_r100.json"},
+            "zr_eff": {"zr_eff_table_file": "models/targets/zr_eff_table_AR20.json"},
             "dissipation": {"beta_a": 1.21, "beta_b": 3.67},
         },
         "calibration": {},
@@ -72,8 +72,8 @@ def test_campaign_config_stress_weight_wires_ar_specific_models():
     assert cfg["flow"]["mode"] == "usf"
     assert cfg["simulation"]["angular_transport_model"] == "stress_weight"
     assert cfg["simulation"]["angular_transport_probability_override"] == 0.6
-    assert cfg["preprocessing"]["gmm"]["gmm_cond_file"] == "models/gmm_cond_AR25.npz"
-    assert cfg["calibration"]["C_alpha_table_file"] == "models/C_alpha_table_AR25.json"
+    assert cfg["preprocessing"]["gmm"]["gmm_cond_file"] == "models/exchange_gmm/gmm_cond_AR25.npz"
+    assert cfg["calibration"]["C_alpha_table_file"] == "models/relaxation/C_alpha_table_AR25.json"
     assert cfg["calibration_sweep"]["parallel_workers"] == 7
     assert cfg["calibration_sweep"]["t_end"] == 123.0
 
@@ -86,7 +86,7 @@ def test_campaign_config_vss_rank2_requires_and_wires_table():
         p_eta=None,
         output_root="runs/AR30_usf_vss_rank2",
         workers=5,
-        vss_table="models/vss_alpha_eff_table_AR30_peta060.json",
+        vss_table="models/angular_transport/vss_alpha_eff_table_AR30_peta060.json",
         seeds=None,
         alpha_values=None,
         t_end=None,
@@ -97,7 +97,7 @@ def test_campaign_config_vss_rank2_requires_and_wires_table():
     assert cfg["simulation"]["angular_transport_model"] == "vss_rank2"
     assert (
         cfg["simulation"]["vss_alpha_eff_table_file"]
-        == "models/vss_alpha_eff_table_AR30_peta060.json"
+        == "models/angular_transport/vss_alpha_eff_table_AR30_peta060.json"
     )
     assert "angular_transport_probability_override" not in cfg["simulation"]
 
@@ -110,18 +110,18 @@ def test_campaign_config_can_enable_rank2_C2_table():
         p_eta=None,
         output_root="runs/AR2_usf_vss_rank2_C2",
         workers=5,
-        vss_table="models/vss_alpha_eff_table_AR20_peta060.json",
+        vss_table="models/angular_transport/vss_alpha_eff_table_AR20_peta060.json",
         seeds=None,
         alpha_values=None,
         t_end=None,
         dt=None,
         dtau=None,
         rank2_correction_enabled=True,
-        C2_table="models/C2_table_AR20.json",
+        C2_table="models/relaxation/C2_table_AR20.json",
     )
 
     assert cfg["simulation"]["rank2_correction_enabled"] is True
-    assert cfg["simulation"]["C2_table_file"] == "models/C2_table_AR20.json"
+    assert cfg["simulation"]["C2_table_file"] == "models/relaxation/C2_table_AR20.json"
 
 
 def test_campaign_config_probe_delta_disables_rank2_C2():
@@ -132,14 +132,14 @@ def test_campaign_config_probe_delta_disables_rank2_C2():
         p_eta=None,
         output_root="runs/AR2_usf_vss_rank2_probe_m010",
         workers=5,
-        vss_table="models/vss_alpha_eff_table_AR20_peta060.json",
+        vss_table="models/angular_transport/vss_alpha_eff_table_AR20_peta060.json",
         seeds=None,
         alpha_values=None,
         t_end=None,
         dt=None,
         dtau=None,
         rank2_correction_enabled=True,
-        C2_table="models/C2_table_AR20.json",
+        C2_table="models/relaxation/C2_table_AR20.json",
         ftr_rank0_probe_delta=-0.1,
     )
 
@@ -165,4 +165,4 @@ def test_generated_config_is_yaml_serializable(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(cfg, sort_keys=False))
     loaded = yaml.safe_load(path.read_text())
-    assert loaded["preprocessing"]["gmm"]["gmm_cond_file"] == "models/gmm_cond_AR15.npz"
+    assert loaded["preprocessing"]["gmm"]["gmm_cond_file"] == "models/exchange_gmm/gmm_cond_AR15.npz"

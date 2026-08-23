@@ -32,9 +32,9 @@ simulation:
   angular_transport_model: current  # 'current', 'stress_weight', or 'vss_rank2'
   # Experimental stress_weight override: probability of full angular scattering.
   angular_transport_probability_override: null
-  vss_alpha_eff_table_file: models/vss_alpha_eff_table_AR20_peta060.json
+  vss_alpha_eff_table_file: models/angular_transport/vss_alpha_eff_table_AR20_peta060.json
   rank2_correction_enabled: false  # USF-only f_tr correction: C_alpha -> C_alpha*(1 + C2*a2)
-  C2_table_file: models/C2_table_AR20.json
+  C2_table_file: models/relaxation/C2_table_AR20.json
   ftr_rank0_probe_delta: null  # USF sensitivity probe: C_alpha -> C_alpha*(1 + delta); disables C2 when set
   hcs_rescale_temperature: false  # HCS-only thermostat for reduced-variable statistics
   hcs_rescale_reference: initial   # currently supports 'initial'
@@ -70,7 +70,7 @@ preprocessing:
     r_range_end: 13
     # Pre-computed conditional GMM npz file for simulation.
     # If not specified, auto-detects gmm_cond_*.npz in model_output_dir.
-    gmm_cond_file: models/gmm_cond_AR20.npz
+    gmm_cond_file: models/exchange_gmm/gmm_cond_AR20.npz
   scattering:
     alpha_dirs: [60, 65, 70, 75, 80, 85, 90, 95, 100]
     ar_dirs: [10, 15, 20, 25, 30, 40]
@@ -101,13 +101,13 @@ preprocessing:
     alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
     r: 1.0
     AR: 2.0
-    ftr_params_file: models/ftr_params_AR20_r100.json
+    ftr_params_file: models/archive/ftr_params_AR20_r100.json
   zr_eff:
     lammps_root: LAMMPS_data/Equal/Calibrate_r/modeB_e_sweep2
     alpha_values: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
     AR: 2.0
     N_part: 40000
-    zr_eff_table_file: models/zr_eff_table_AR20.json
+    zr_eff_table_file: models/targets/zr_eff_table_AR20.json
   model_output_dir: models/
 
 postprocessing:
@@ -124,8 +124,8 @@ postprocessing:
   exclude_alphas: [0.50, 0.55, 0.60]
 
 calibration:
-  C_alpha_table_file: models/C_alpha_table_AR20.json
-  theta_target_table_file: models/theta_target_table_AR20.json
+  C_alpha_table_file: models/relaxation/C_alpha_table_AR20.json
+  theta_target_table_file: models/targets/theta_target_table_AR20.json
 
 calibration_sweep:
   AR: 2.0
